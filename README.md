@@ -14,7 +14,7 @@ sharing: the first account you create is the only account it will ever have.
 |---|---|---|
 | **Tasks** | Projects, lists, subtasks, tags, comments, priorities, recurring tasks, board / list / "my day" views, time tracking with a live timer | Basecamp, ClickUp |
 | **Social** | Multi-account composer for X, LinkedIn, Facebook Pages, Instagram, TikTok, Mastodon, Bluesky, Discord, Telegram and webhooks; per-network character limits, scheduling queue, month calendar, background publishing with retries and token refresh | Buffer, Hootsuite |
-| **SEO & AEO** | Site crawler, technical on-page audit, answer-engine readiness scoring, rank tracking, competitor-derived content briefs | Semrush, Ahrefs |
+| **SEO & AEO** | Google Search Console sync (the queries you actually rank for, with movement and ranked opportunities), site crawler, technical on-page audit, answer-engine readiness scoring, keyword ideas, rank tracking, content briefs | Semrush, Ahrefs |
 | **Budget** | Accounts, transactions, envelope budgets, recurring bills, CSV import with duplicate detection, transfers, savings goals, cashflow reports | YNAB, Monarch |
 | **Business** | Clients, deal pipeline, invoices with payments, bill-tracked-time-to-invoice, KPI tracking, notes | Bonsai, Harvest |
 | **Dashboard** | One cross-module view: net worth, revenue, workload, queue health, search visibility, and a single "needs attention" list drawn from every module | Geckoboard |
@@ -101,6 +101,15 @@ Under **Settings → Rank tracking**, pick:
 
 The crawler, on-page audit and AEO scoring never call a third party — they fetch
 your own pages and analyse them locally.
+
+## How this compares to Semrush and Moz
+
+Honestly: **[docs/SEO-DATA.md](docs/SEO-DATA.md)** sets out what is achievable
+and what is not. The short version — search volume, backlink indexes and
+competitors' keywords need a web-scale crawl and licensed data, so they are out
+of reach. But "which keywords do I rank for" is answered by Google Search
+Console with your *own* data, which is better than any third-party estimate, and
+it is free.
 
 ## What "AEO" means here
 

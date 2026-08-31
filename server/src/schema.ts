@@ -384,6 +384,57 @@ CREATE TABLE IF NOT EXISTS content_briefs (
   created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- ------------------------------------------------- google search console ---
+-- Ground truth for what a site actually ranks for, straight from Google.
+CREATE TABLE IF NOT EXISTS gsc_syncs (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  site_id     INTEGER NOT NULL REFERENCES seo_sites(id) ON DELETE CASCADE,
+  status      TEXT NOT NULL DEFAULT 'running',   -- running|done|failed
+  started_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  finished_at TEXT,
+  date_start  TEXT NOT NULL,
+  date_end    TEXT NOT NULL,
+  rows_fetched INTEGER NOT NULL DEFAULT 0,
+  error       TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_gsc_syncs_site ON gsc_syncs(site_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS gsc_queries (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  sync_id     INTEGER NOT NULL REFERENCES gsc_syncs(id) ON DELETE CASCADE,
+  site_id     INTEGER NOT NULL REFERENCES seo_sites(id) ON DELETE CASCADE,
+  query       TEXT NOT NULL,
+  clicks      INTEGER NOT NULL DEFAULT 0,
+  impressions INTEGER NOT NULL DEFAULT 0,
+  ctr         REAL NOT NULL DEFAULT 0,
+  position    REAL NOT NULL DEFAULT 0,
+  UNIQUE(sync_id, query)
+);
+CREATE INDEX IF NOT EXISTS idx_gsc_queries_site ON gsc_queries(site_id, impressions DESC);
+
+CREATE TABLE IF NOT EXISTS gsc_pages (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  sync_id     INTEGER NOT NULL REFERENCES gsc_syncs(id) ON DELETE CASCADE,
+  site_id     INTEGER NOT NULL REFERENCES seo_sites(id) ON DELETE CASCADE,
+  page        TEXT NOT NULL,
+  clicks      INTEGER NOT NULL DEFAULT 0,
+  impressions INTEGER NOT NULL DEFAULT 0,
+  ctr         REAL NOT NULL DEFAULT 0,
+  position    REAL NOT NULL DEFAULT 0,
+  UNIQUE(sync_id, page)
+);
+
+-- Cached keyword ideas so repeat lookups do not re-hit the source.
+CREATE TABLE IF NOT EXISTS keyword_ideas (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  site_id    INTEGER REFERENCES seo_sites(id) ON DELETE CASCADE,
+  seed       TEXT NOT NULL,
+  idea       TEXT NOT NULL,
+  source     TEXT NOT NULL DEFAULT 'autocomplete',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(site_id, seed, idea)
+);
+
 -- -------------------------------------------------------------- budget ----
 CREATE TABLE IF NOT EXISTS accounts (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,

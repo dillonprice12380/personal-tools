@@ -50,11 +50,17 @@ const SEVERITY_TONE: Record<string, 'critical' | 'warning' | ''> = {
   notice: '',
 };
 
+type Tab = 'overview' | 'console' | 'audit' | 'keywords' | 'ideas' | 'briefs';
+
 export function SeoPage() {
   const sites = useApi<ListResponse<Site>>('/seo-sites');
   const [siteId, setSiteId] = useState<number | null>(null);
-  const [tab, setTab] = useState<'overview' | 'audit' | 'keywords' | 'briefs'>('overview');
+  const [tab, setTab] = useState<Tab>('overview');
   const [addingSite, setAddingSite] = useState(false);
+  const [notice, setNotice] = useState<string | null>(() => {
+    const p = new URLSearchParams(window.location.search);
+    return p.get('connected') ? `${p.get('connected')} connected.` : null;
+  });
 
   const list = sites.data?.items ?? [];
   const active = siteId ?? list[0]?.id ?? null;
@@ -79,6 +85,22 @@ export function SeoPage() {
       </header>
 
       <div className="page stack" style={{ gap: 14 }}>
+        {notice && (
+          <div className="banner ok">
+            <div className="row">
+              <span style={{ flex: 1 }}>{notice}</span>
+              <button
+                className="btn sm ghost"
+                onClick={() => {
+                  setNotice(null);
+                  window.history.replaceState({}, '', '/seo');
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
         {!list.length ? (
           <Card>
             <Empty
@@ -92,16 +114,20 @@ export function SeoPage() {
             <Tabs
               tabs={[
                 { id: 'overview', label: 'Overview' },
+                { id: 'console', label: 'Search Console' },
                 { id: 'audit', label: 'Site audit' },
                 { id: 'keywords', label: 'Keywords' },
+                { id: 'ideas', label: 'Keyword ideas' },
                 { id: 'briefs', label: 'Content briefs' },
               ]}
               active={tab}
               onChange={setTab}
             />
             {active && tab === 'overview' && <OverviewTab siteId={active} onGoTo={setTab} />}
+            {active && tab === 'console' && <SearchConsoleTab siteId={active} />}
             {active && tab === 'audit' && <AuditTab siteId={active} onCrawled={() => void sites.reload()} />}
             {active && tab === 'keywords' && <KeywordsTab siteId={active} />}
+            {active && tab === 'ideas' && <IdeasTab siteId={active} />}
             {active && tab === 'briefs' && <BriefsTab siteId={active} />}
           </>
         )}
@@ -160,7 +186,11 @@ function SiteForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
 
 function OverviewTab({ siteId, onGoTo }: { siteId: number; onGoTo: (tab: any) => void }) {
   const { data } = useApi<Overview>(`/seo-overview?site_id=${siteId}`, [siteId]);
+  const site = useApi<any>(`/seo-sites/${siteId}`, [siteId]);
+  const [authError, setAuthError] = useState('');
+  const [checking, setChecking] = useState(false);
   if (!data) return <div className="muted">Loading…</div>;
+  const authority = site.data?.authority ?? {};
 
   const checks = data.crawl?.site_checks ?? {};
   const aiBots = (checks.ai_bots_allowed ?? {}) as Record<string, boolean>;
@@ -202,6 +232,51 @@ function OverviewTab({ siteId, onGoTo }: { siteId: number; onGoTo: (tab: any) =>
           />
         </Card>
       </div>
+
+      <Card
+        title="Domain authority"
+        actions={
+          <button
+            className="btn sm"
+            disabled={checking}
+            onClick={async () => {
+              setChecking(true);
+              setAuthError('');
+              try {
+                await api.post(`/seo-sites/${siteId}/authority`);
+                void site.reload();
+              } catch (err: any) {
+                setAuthError(err?.message ?? 'Could not fetch authority');
+              } finally {
+                setChecking(false);
+              }
+            }}
+          >
+            {checking ? 'Checking…' : 'Check now'}
+          </button>
+        }
+      >
+        {authority.score != null ? (
+          <div className="row" style={{ gap: 16 }}>
+            <ScoreRing score={authority.score} label="Authority" />
+            <div>
+              <Stat
+                label={authority.source}
+                value={`${authority.raw} / 10`}
+                sub={authority.rank ? `global rank #${num(authority.rank)}` : undefined}
+                small
+              />
+            </div>
+          </div>
+        ) : (
+          <p className="small muted" style={{ margin: 0 }}>
+            Not checked yet. Moz's Domain Authority and Ahrefs' Domain Rating are proprietary scores
+            computed from their own crawls of the web's link graph, so they cannot be calculated
+            locally. Helm reads Open PageRank instead — a free, comparable third-party measure.
+          </p>
+        )}
+        {authError && <Banner tone="error">{authError}</Banner>}
+      </Card>
 
       <div className="grid sidebar-right">
         <Card title="Rank distribution">
@@ -797,5 +872,417 @@ function BriefsTab({ siteId }: { siteId: number }) {
         </Modal>
       )}
     </Card>
+  );
+}
+
+// --------------------------------------------------------- search console ---
+type GscQuery = {
+  query: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+  position_delta: number | null;
+  clicks_delta: number | null;
+};
+
+type Opportunity = {
+  query: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+  kind: string;
+  reason: string;
+};
+
+const OPPORTUNITY_LABEL: Record<string, string> = {
+  striking_distance: 'Page two — closest wins',
+  push_to_top3: 'Push into the top 3',
+  low_ctr: 'Rewrite title & description',
+  rising: 'Rising',
+};
+
+function SearchConsoleTab({ siteId }: { siteId: number }) {
+  const status = useApi<{ connected: boolean; sites: any[] }>('/gsc/status');
+  const site = useApi<any>(`/seo-sites/${siteId}`, [siteId]);
+  const summary = useApi<any>(`/seo-sites/${siteId}/gsc/summary`, [siteId]);
+  const queries = useApi<{ sync: any; items: GscQuery[] }>(
+    `/seo-sites/${siteId}/gsc/queries?limit=300`,
+    [siteId]
+  );
+  const opps = useApi<{ items: Opportunity[] }>(`/seo-sites/${siteId}/gsc/opportunities`, [siteId]);
+
+  const [properties, setProperties] = useState<any[] | null>(null);
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  const [selected, setSelected] = useState<string[]>([]);
+  const [view, setView] = useState<'opportunities' | 'queries'>('opportunities');
+
+  const reloadAll = () => {
+    void site.reload();
+    void summary.reload();
+    void queries.reload();
+    void opps.reload();
+  };
+
+  if (!status.data) return <div className="muted">Loading…</div>;
+
+  if (!status.data.connected) {
+    return (
+      <Card>
+        <Empty
+          icon="◎"
+          title="Google Search Console is not connected"
+          hint={
+            <>
+              This is where "which keywords do I rank for?" gets answered — with Google's own data,
+              not an estimate. Add a Google app under{' '}
+              <a href="/settings">Settings → Social network apps</a>, then click Connect.
+            </>
+          }
+        />
+      </Card>
+    );
+  }
+
+  const property = site.data?.gsc_property;
+
+  return (
+    <div className="stack" style={{ gap: 14 }}>
+      {error && <Banner tone="error">{error}</Banner>}
+
+      <Card title="Property">
+        <div className="row wrap">
+          {property ? (
+            <>
+              <Chip tone="good">{property}</Chip>
+              <button
+                className="btn sm primary"
+                disabled={busy === 'sync'}
+                onClick={async () => {
+                  setBusy('sync');
+                  setError('');
+                  try {
+                    await api.post(`/seo-sites/${siteId}/gsc/sync`, { days: 28 });
+                    reloadAll();
+                  } catch (err: any) {
+                    setError(err?.message ?? 'Sync failed');
+                  } finally {
+                    setBusy('');
+                  }
+                }}
+              >
+                {busy === 'sync' ? 'Syncing…' : 'Sync last 28 days'}
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="small muted">No property linked yet.</span>
+              <button
+                className="btn sm"
+                disabled={busy === 'props'}
+                onClick={async () => {
+                  setBusy('props');
+                  setError('');
+                  try {
+                    const res = await api.get<{ items: any[] }>('/gsc/properties');
+                    setProperties(res.items);
+                  } catch (err: any) {
+                    setError(err?.message ?? 'Could not list properties');
+                  } finally {
+                    setBusy('');
+                  }
+                }}
+              >
+                {busy === 'props' ? 'Loading…' : 'Choose property'}
+              </button>
+            </>
+          )}
+          {summary.data?.sync && (
+            <span className="small muted">
+              Last sync {formatDateTime(summary.data.sync.started_at)} ·{' '}
+              {summary.data.sync.date_start} to {summary.data.sync.date_end}
+            </span>
+          )}
+        </div>
+
+        {properties && (
+          <div className="stack" style={{ marginTop: 10 }}>
+            {properties.length ? (
+              properties.map((p) => (
+                <button
+                  key={p.siteUrl}
+                  className="btn sm"
+                  onClick={async () => {
+                    await api.post(`/seo-sites/${siteId}/gsc/link`, { property: p.siteUrl });
+                    setProperties(null);
+                    reloadAll();
+                  }}
+                >
+                  {p.siteUrl} <span className="muted">({p.permissionLevel})</span>
+                </button>
+              ))
+            ) : (
+              <span className="small muted">
+                No verified properties on this Google account.
+              </span>
+            )}
+          </div>
+        )}
+      </Card>
+
+      {!summary.data ? (
+        <Card>
+          <Empty icon="◎" title="No Search Console data yet" hint="Link a property and run a sync." />
+        </Card>
+      ) : (
+        <>
+          <div className="grid cols-4">
+            <Card><Stat label="Clicks" value={num(summary.data.totals.clicks)} sub="last 28 days" /></Card>
+            <Card><Stat label="Impressions" value={num(summary.data.totals.impressions)} /></Card>
+            <Card>
+              <Stat label="Average CTR" value={`${(summary.data.totals.ctr * 100).toFixed(1)}%`} />
+            </Card>
+            <Card>
+              <Stat
+                label="Ranking for"
+                value={num(summary.data.totals.queries)}
+                sub={`avg position ${summary.data.totals.avg_position}`}
+              />
+            </Card>
+          </div>
+
+          <Card title="Where you rank">
+            <RankedBars
+              items={[
+                { label: 'Positions 1–3', value: summary.data.buckets.top3 ?? 0 },
+                { label: 'Positions 4–10', value: summary.data.buckets.top10 ?? 0 },
+                { label: 'Page two (11–20)', value: summary.data.buckets.page2 ?? 0 },
+                { label: 'Beyond 20', value: summary.data.buckets.beyond ?? 0 },
+              ]}
+              format={(v) => `${v} queries`}
+            />
+          </Card>
+
+          <Tabs
+            tabs={[
+              { id: 'opportunities', label: 'Opportunities', count: opps.data?.items.length },
+              { id: 'queries', label: 'All queries', count: queries.data?.items.length },
+            ]}
+            active={view}
+            onChange={setView}
+          />
+
+          {view === 'opportunities' ? (
+            <Card
+              title="Highest-leverage work"
+              actions={<span className="small muted">Derived from your own Search Console data</span>}
+              padded={false}
+            >
+              {opps.data?.items.length ? (
+                <div className="table-wrap">
+                  <table className="data">
+                    <thead>
+                      <tr>
+                        <th>Query</th><th>What to do</th>
+                        <th className="right">Position</th><th className="right">Impressions</th><th className="right">Clicks</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {opps.data.items.map((o) => (
+                        <tr key={o.query}>
+                          <td>{o.query}</td>
+                          <td>
+                            <Chip tone={o.kind === 'striking_distance' ? 'accent' : ''}>
+                              {OPPORTUNITY_LABEL[o.kind] ?? o.kind}
+                            </Chip>
+                            <div className="small muted" style={{ maxWidth: 420 }}>{o.reason}</div>
+                          </td>
+                          <td className="right">{o.position.toFixed(1)}</td>
+                          <td className="right">{num(o.impressions)}</td>
+                          <td className="right">{num(o.clicks)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <Empty icon="✓" title="No obvious quick wins" hint="Sync again after a few weeks of data." />
+              )}
+            </Card>
+          ) : (
+            <Card
+              title="Queries you rank for"
+              actions={
+                <button
+                  className="btn sm"
+                  disabled={!selected.length}
+                  onClick={async () => {
+                    const res = await api.post<{ imported: number }>(
+                      `/seo-sites/${siteId}/gsc/import-keywords`,
+                      { queries: selected }
+                    );
+                    setSelected([]);
+                    setError('');
+                    alert(`Imported ${res.imported} keyword(s) for rank tracking.`);
+                  }}
+                >
+                  Track selected ({selected.length})
+                </button>
+              }
+              padded={false}
+            >
+              <div className="table-wrap">
+                <table className="data">
+                  <thead>
+                    <tr>
+                      <th></th><th>Query</th>
+                      <th className="right">Clicks</th><th className="right">Impressions</th>
+                      <th className="right">CTR</th><th className="right">Position</th><th className="right">Change</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(queries.data?.items ?? []).map((q) => (
+                      <tr key={q.query}>
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={selected.includes(q.query)}
+                            onChange={(e) =>
+                              setSelected((prev) =>
+                                e.target.checked ? [...prev, q.query] : prev.filter((s) => s !== q.query)
+                              )
+                            }
+                          />
+                        </td>
+                        <td>{q.query}</td>
+                        <td className="right">{num(q.clicks)}</td>
+                        <td className="right">{num(q.impressions)}</td>
+                        <td className="right">{(q.ctr * 100).toFixed(1)}%</td>
+                        <td className="right">{q.position.toFixed(1)}</td>
+                        <td className="right">
+                          {q.position_delta === null ? (
+                            <span className="muted">—</span>
+                          ) : q.position_delta === 0 ? (
+                            <span className="muted">0</span>
+                          ) : (
+                            <span className={q.position_delta > 0 ? 'pos' : 'neg'}>
+                              {q.position_delta > 0 ? '▲' : '▼'} {Math.abs(q.position_delta)}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ----------------------------------------------------------- keyword ideas --
+function IdeasTab({ siteId }: { siteId: number }) {
+  const [seed, setSeed] = useState('');
+  const [deep, setDeep] = useState(false);
+  const [ideas, setIdeas] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [selected, setSelected] = useState<string[]>([]);
+
+  const generate = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const res = await api.post<{ ideas: string[] }>('/keyword-ideas', {
+        seed,
+        site_id: siteId,
+        deep,
+      });
+      setIdeas(res.ideas);
+      if (!res.ideas.length) setError('No suggestions came back for that seed.');
+    } catch (err: any) {
+      setError(err?.message ?? 'Could not fetch ideas');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="stack" style={{ gap: 14 }}>
+      <Card title="Keyword ideas">
+        <div className="row wrap" style={{ alignItems: 'flex-end' }}>
+          <Field label="Seed keyword">
+            <input
+              value={seed}
+              onChange={(e) => setSeed(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && seed.trim() && generate()}
+              placeholder="espresso machine"
+              style={{ width: 260 }}
+            />
+          </Field>
+          <label className="check">
+            <input type="checkbox" checked={deep} onChange={(e) => setDeep(e.target.checked)} />
+            Deep (slower, many more ideas)
+          </label>
+          <button className="btn primary" disabled={busy || !seed.trim()} onClick={generate}>
+            {busy ? 'Searching…' : 'Get ideas'}
+          </button>
+        </div>
+        <p className="small muted" style={{ marginTop: 8 }}>
+          Real phrasings pulled from Google autocomplete. These are the words people actually type —
+          but there are no search volumes here, because that number comes from paid datasets.
+        </p>
+        {error && <Banner tone="error">{error}</Banner>}
+      </Card>
+
+      {ideas.length > 0 && (
+        <Card
+          title={`${ideas.length} ideas`}
+          actions={
+            <button
+              className="btn sm"
+              disabled={!selected.length}
+              onClick={async () => {
+                let imported = 0;
+                for (const idea of selected) {
+                  try {
+                    await api.post('/seo-keywords', { site_id: siteId, keyword: idea });
+                    imported += 1;
+                  } catch {
+                    /* already tracked */
+                  }
+                }
+                setSelected([]);
+                alert(`Added ${imported} keyword(s) to tracking.`);
+              }}
+            >
+              Track selected ({selected.length})
+            </button>
+          }
+        >
+          <div className="row wrap" style={{ gap: 6 }}>
+            {ideas.map((idea) => {
+              const on = selected.includes(idea);
+              return (
+                <button
+                  key={idea}
+                  className={`btn sm ${on ? 'primary' : ''}`}
+                  onClick={() =>
+                    setSelected((prev) => (on ? prev.filter((s) => s !== idea) : [...prev, idea]))
+                  }
+                >
+                  {idea}
+                </button>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+    </div>
   );
 }

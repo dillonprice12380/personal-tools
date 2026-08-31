@@ -129,6 +129,21 @@ oauthRouter.get(
         code: String(req.query.code ?? ''),
         codeVerifier: stored.verifier ?? undefined,
       });
+
+      // Google is not a posting target - it backs the SEO module instead, so it
+      // stores a credential and returns to the SEO page rather than creating a
+      // social account.
+      if (provider.id === 'google') {
+        run(`DELETE FROM credentials WHERE service = 'google'`);
+        run('INSERT INTO credentials (service, label, data_enc) VALUES (?, ?, ?)', [
+          'google',
+          'Google Search Console',
+          encryptJson(tokens),
+        ]);
+        logActivity('seo_sites', null, 'connect', 'Google Search Console');
+        return res.redirect('/seo?connected=Google%20Search%20Console');
+      }
+
       const identity = await resolveIdentity(provider.id, tokens, app);
 
       const credentialId = Number(

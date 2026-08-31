@@ -10,6 +10,15 @@ import {
   serpProviderId,
 } from '../services/seo/serp.js';
 import { buildBrief } from '../services/seo/briefs.js';
+import {
+  gscSummary,
+  listProperties,
+  opportunities,
+  queriesWithMovement,
+  syncSite,
+} from '../services/seo/gsc.js';
+import { cacheIdeas, cachedIdeas, keywordIdeas } from '../services/seo/suggest.js';
+import { refreshAuthority } from '../services/seo/authority.js';
 
 export const seoRouter = Router();
 
@@ -22,13 +31,14 @@ seoRouter.use(
   '/seo-sites',
   crud({
     table: 'seo_sites',
-    columns: ['name', 'base_url', 'client_id'],
+    columns: ['name', 'base_url', 'client_id', 'gsc_property'],
     required: ['name', 'base_url'],
     search: ['name', 'base_url'],
     orderBy: 'name ASC',
     describe: (r) => r?.name ?? '',
     hydrate: (row) => ({
       ...row,
+      authority: parseJson<any>(row.authority_json, {}),
       keyword_count: scalar<number>('SELECT COUNT(*) FROM seo_keywords WHERE site_id = ?', [row.id], 0),
       last_crawl: get(
         `SELECT id, status, started_at, finished_at, pages_crawled, health_score
@@ -48,6 +58,141 @@ seoRouter.use(
         }
       }
     },
+  })
+);
+
+/** Refresh the site's third-party authority score. */
+seoRouter.post(
+  '/seo-sites/:id/authority',
+  wrap(async (req, res) => {
+    const id = toInt(req.params.id);
+    if (!get('SELECT id FROM seo_sites WHERE id = ?', [id])) throw notFound('Site');
+    res.json(await refreshAuthority(id));
+  })
+);
+
+// ------------------------------------------------- google search console ---
+/** Whether Google is connected, and which properties it can read. */
+seoRouter.get(
+  '/gsc/status',
+  wrap((_req, res) => {
+    const connected = !!get('SELECT id FROM credentials WHERE service = ?', ['google']);
+    res.json({
+      connected,
+      sites: all(
+        `SELECT id, name, base_url, gsc_property FROM seo_sites ORDER BY name`
+      ),
+    });
+  })
+);
+
+/** Live call to Google for the property list. */
+seoRouter.get(
+  '/gsc/properties',
+  wrap(async (_req, res) => {
+    res.json({ items: await listProperties() });
+  })
+);
+
+/** Point a Helm site at one Search Console property. */
+seoRouter.post(
+  '/seo-sites/:id/gsc/link',
+  wrap((req, res) => {
+    const id = toInt(req.params.id);
+    if (!get('SELECT id FROM seo_sites WHERE id = ?', [id])) throw notFound('Site');
+    const property = String(req.body?.property ?? '').trim();
+    run('UPDATE seo_sites SET gsc_property = ? WHERE id = ?', [property, id]);
+    res.json(get('SELECT * FROM seo_sites WHERE id = ?', [id]));
+  })
+);
+
+seoRouter.post(
+  '/seo-sites/:id/gsc/sync',
+  wrap(async (req, res) => {
+    const id = toInt(req.params.id);
+    if (!get('SELECT id FROM seo_sites WHERE id = ?', [id])) throw notFound('Site');
+    const result = await syncSite(id, { days: toInt(req.body?.days, 28) || 28 });
+    res.json({ ...result, summary: gscSummary(id) });
+  })
+);
+
+seoRouter.get(
+  '/seo-sites/:id/gsc/summary',
+  wrap((req, res) => res.json(gscSummary(toInt(req.params.id))))
+);
+
+/** Every query the site actually ranks for, with movement since the last sync. */
+seoRouter.get(
+  '/seo-sites/:id/gsc/queries',
+  wrap((req, res) => {
+    const limit = Math.min(toInt(req.query.limit, 200) || 200, 1000);
+    res.json(queriesWithMovement(toInt(req.params.id), limit));
+  })
+);
+
+seoRouter.get(
+  '/seo-sites/:id/gsc/opportunities',
+  wrap((req, res) => {
+    res.json({ items: opportunities(toInt(req.params.id), toInt(req.query.limit, 50) || 50) });
+  })
+);
+
+/**
+ * Promote discovered queries into tracked keywords, so rank history starts
+ * accumulating for the ones worth watching.
+ */
+seoRouter.post(
+  '/seo-sites/:id/gsc/import-keywords',
+  wrap((req, res) => {
+    const siteId = toInt(req.params.id);
+    const queries: string[] = Array.isArray(req.body?.queries) ? req.body.queries : [];
+    if (!queries.length) throw badRequest('No queries supplied');
+
+    let imported = 0;
+    let skipped = 0;
+    for (const keyword of queries) {
+      const term = String(keyword).trim();
+      if (!term) continue;
+      const existing = get('SELECT id FROM seo_keywords WHERE site_id = ? AND keyword = ?', [
+        siteId,
+        term,
+      ]);
+      if (existing) {
+        skipped += 1;
+        continue;
+      }
+      run(
+        `INSERT INTO seo_keywords (site_id, keyword, source, target_url)
+         VALUES (?, ?, 'search_console', '')`,
+        [siteId, term]
+      );
+      imported += 1;
+    }
+    res.json({ imported, skipped });
+  })
+);
+
+// -------------------------------------------------------- keyword ideas ----
+seoRouter.post(
+  '/keyword-ideas',
+  wrap(async (req, res) => {
+    const seed = String(req.body?.seed ?? '').trim();
+    if (!seed) throw badRequest('A seed keyword is required');
+    const siteId = req.body?.site_id ? toInt(req.body.site_id) : null;
+    const result = await keywordIdeas(seed, {
+      country: req.body?.country ?? 'us',
+      deep: !!req.body?.deep,
+    });
+    if (siteId) cacheIdeas(siteId, seed, result.ideas);
+    res.json({ seed, count: result.ideas.length, ...result });
+  })
+);
+
+seoRouter.get(
+  '/keyword-ideas',
+  wrap((req, res) => {
+    const siteId = req.query.site_id ? toInt(req.query.site_id) : null;
+    res.json({ items: cachedIdeas(siteId, req.query.seed ? String(req.query.seed) : undefined) });
   })
 );
 

@@ -225,8 +225,10 @@ function SocialApps({
 
   return (
     <Card
-      title="Social network apps"
-      actions={<span className="small muted">LinkedIn, Facebook, Instagram, TikTok</span>}
+      title="Connected apps"
+      actions={
+        <span className="small muted">Google Search Console, LinkedIn, Facebook, Instagram, TikTok</span>
+      }
     >
       <div className="stack">
         <Field
@@ -277,8 +279,9 @@ function SocialApps({
           </table>
         </div>
         <p className="small muted">
-          X uses keys you issue yourself in its developer portal, so it is added directly on the
-          Social → Accounts tab rather than here.
+          Google Search Console powers the SEO module — it reports the queries your site actually
+          ranks for. X uses keys you issue yourself, so it is added on the Social → Accounts tab
+          rather than here.
         </p>
       </div>
 

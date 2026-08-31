@@ -73,6 +73,18 @@ export const OAUTH2_PROVIDERS: Record<string, OAuth2Config> = {
     tokenRequestIn: 'query',
     note: 'Needs an Instagram Business or Creator account linked to a Facebook Page. Every post must include media.',
   },
+  google: {
+    id: 'google',
+    label: 'Google Search Console',
+    authorizeUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+    tokenUrl: 'https://oauth2.googleapis.com/token',
+    scopes: ['https://www.googleapis.com/auth/webmasters.readonly'],
+    // access_type=offline plus prompt=consent is what makes Google hand back a
+    // refresh token; without both, the connection dies after an hour.
+    extraAuthParams: { access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true' },
+    tokenRequestIn: 'body',
+    note: 'Read-only access to your Search Console data: the queries you actually rank for, straight from Google.',
+  },
   tiktok: {
     id: 'tiktok',
     label: 'TikTok',

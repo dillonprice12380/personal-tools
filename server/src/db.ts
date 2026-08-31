@@ -1,11 +1,16 @@
 import Database from 'better-sqlite3';
 import { config } from './config.js';
 import { SCHEMA } from './schema.js';
+import { runMigrations } from './migrations.js';
 
 export const db = new Database(config.dbPath);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 db.exec(SCHEMA);
+
+// Bring an older database up to the current column set before anything reads it.
+const applied = runMigrations(db);
+if (applied.length) console.log(`[helm] applied migrations: ${applied.join(', ')}`);
 
 export type Row = Record<string, any>;
 
