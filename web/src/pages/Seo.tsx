@@ -29,6 +29,14 @@ type Keyword = {
 
 type Overview = {
   site: Site;
+  sources: {
+    gsc_connected: boolean;
+    gsc_linked: boolean;
+    gsc_synced: boolean;
+    serp_provider: string;
+    has_rankings: boolean;
+    none_configured: boolean;
+  };
   crawl: any;
   keywords: {
     total: number;
@@ -214,21 +222,33 @@ function OverviewTab({ siteId, onGoTo }: { siteId: number; onGoTo: (tab: any) =>
           <Stat
             label="Avg position"
             value={data.keywords.avg_position ?? '—'}
-            sub={`${data.keywords.ranked} of ${data.keywords.total} ranking`}
+            sub={
+              data.sources?.none_configured
+                ? 'no ranking source connected'
+                : `${data.keywords.ranked} of ${data.keywords.total} ranking`
+            }
           />
         </Card>
         <Card>
           <Stat
             label="Top 3"
-            value={num(buckets.top3 ?? 0)}
-            sub={`${num(buckets.top10 ?? 0)} in 4–10`}
+            value={data.sources?.none_configured ? '—' : num(buckets.top3 ?? 0)}
+            sub={
+              data.sources?.none_configured
+                ? 'needs Search Console'
+                : `${num(buckets.top10 ?? 0)} in 4–10`
+            }
           />
         </Card>
         <Card>
           <Stat
             label="AI answer citations"
-            value={num(data.keywords.ai_overviews)}
-            sub="keywords cited in AI overviews"
+            value={data.sources?.none_configured ? '—' : num(data.keywords.ai_overviews)}
+            sub={
+              data.sources?.none_configured
+                ? 'needs a SERP API'
+                : 'keywords cited in AI overviews'
+            }
           />
         </Card>
       </div>
@@ -278,19 +298,62 @@ function OverviewTab({ siteId, onGoTo }: { siteId: number; onGoTo: (tab: any) =>
         {authError && <Banner tone="error">{authError}</Banner>}
       </Card>
 
+      {data.sources?.none_configured && (
+        <Card title="No ranking data source connected">
+          <p style={{ marginTop: 0 }}>
+            Crawling reads <strong>your own pages</strong> — that is where the site health score and
+            the answer-engine checks come from, and yours look good. But your <strong>position in
+            Google</strong> is information that only Google has: no crawl of your own site can
+            reveal it, so these boxes will stay empty however many times you re-crawl.
+          </p>
+          <p>Two ways to fill them in:</p>
+          <ul style={{ margin: '0 0 10px 18px', padding: 0 }}>
+            <li>
+              <strong>Google Search Console</strong> (free, recommended) — every query you actually
+              rank for, with clicks and impressions. Connect it under{' '}
+              <a href="/settings">Settings → Connected apps</a>, then open the{' '}
+              <button
+                className="btn sm ghost"
+                style={{ padding: '0 4px' }}
+                onClick={() => onGoTo('console')}
+              >
+                Search Console
+              </button>{' '}
+              tab.
+            </li>
+            <li>
+              <strong>A SERP API</strong> (paid, optional) — precise daily positions for keywords you
+              choose. Set one in <a href="/settings">Settings → Rank tracking</a>.
+            </li>
+          </ul>
+          <p className="small muted" style={{ margin: 0 }}>
+            You can also record positions by hand on the Keywords tab, which is enough to start a
+            history without paying for anything.
+          </p>
+        </Card>
+      )}
+
       <div className="grid sidebar-right">
         <Card title="Rank distribution">
-          <RankedBars
-            items={[
-              { label: 'Positions 1–3', value: buckets.top3 ?? 0 },
-              { label: 'Positions 4–10', value: buckets.top10 ?? 0 },
-              { label: 'Positions 11–20', value: buckets.top20 ?? 0 },
-              { label: 'Positions 21–50', value: buckets.top50 ?? 0 },
-              { label: 'Beyond 50', value: buckets.beyond ?? 0 },
-              { label: 'Not ranking', value: buckets.unranked ?? 0 },
-            ]}
-            format={(v) => `${v} kw`}
-          />
+          {data.sources?.none_configured ? (
+            <Empty
+              icon="◎"
+              title="Nothing to plot yet"
+              hint="Connect Search Console, or record a position by hand, and this fills in."
+            />
+          ) : (
+            <RankedBars
+              items={[
+                { label: 'Positions 1–3', value: buckets.top3 ?? 0 },
+                { label: 'Positions 4–10', value: buckets.top10 ?? 0 },
+                { label: 'Positions 11–20', value: buckets.top20 ?? 0 },
+                { label: 'Positions 21–50', value: buckets.top50 ?? 0 },
+                { label: 'Beyond 50', value: buckets.beyond ?? 0 },
+                { label: 'Not ranking', value: buckets.unranked ?? 0 },
+              ]}
+              format={(v) => `${v} kw`}
+            />
+          )}
         </Card>
 
         <Card title="Answer-engine readiness">
@@ -334,7 +397,11 @@ function OverviewTab({ siteId, onGoTo }: { siteId: number; onGoTo: (tab: any) =>
               </table>
             </div>
           ) : (
-            <Empty icon="◎" title="No movement recorded" hint="Track positions to see changes over time." />
+            <Empty
+              icon="◎"
+              title="No movement recorded"
+              hint="Movement needs at least two position checks on different days, so this stays empty until a second one lands."
+            />
           )}
         </Card>
 
@@ -347,7 +414,11 @@ function OverviewTab({ siteId, onGoTo }: { siteId: number; onGoTo: (tab: any) =>
               </div>
             ))
           ) : (
-            <Empty icon="✎" title="No briefs yet" />
+            <Empty
+              icon="✎"
+              title="No briefs yet"
+              hint="Open a keyword on the Keywords tab and choose Generate content brief."
+            />
           )}
         </Card>
       </div>

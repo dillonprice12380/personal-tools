@@ -523,8 +523,31 @@ seoRouter.get(
       else buckets.beyond += 1;
     }
 
+    // Where ranking data could come from, so the UI can explain an empty
+    // report instead of showing a wall of zeroes.
+    const gscConnected = !!get('SELECT id FROM credentials WHERE service = ?', ['google']);
+    const gscSynced = !!get(
+      `SELECT id FROM gsc_syncs WHERE site_id = ? AND status = 'done' LIMIT 1`,
+      [siteId]
+    );
+    const anyRankings = !!get(
+      `SELECT r.id FROM seo_rankings r
+         JOIN seo_keywords k ON k.id = r.keyword_id
+        WHERE k.site_id = ? LIMIT 1`,
+      [siteId]
+    );
+
     res.json({
       site,
+      sources: {
+        gsc_connected: gscConnected,
+        gsc_linked: !!site.gsc_property,
+        gsc_synced: gscSynced,
+        serp_provider: serpProviderId(),
+        has_rankings: anyRankings,
+        // Nothing anywhere can report a position for this site yet.
+        none_configured: !gscSynced && !anyRankings && serpProviderId() === 'manual',
+      },
       crawl: lastCrawl
         ? { ...lastCrawl, site_checks: parseJson(lastCrawl.site_checks_json, {}) }
         : null,
