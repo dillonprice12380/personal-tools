@@ -25,29 +25,37 @@ invoice sits in the same alert list as a failed social post.
 
 ## Getting started
 
-Requires Node.js 20 or newer.
+Requires **Node.js 20 or newer** and git.
+
+> **Run these in a terminal, not the Node.js REPL.** If your prompt is `>` and
+> shows "Welcome to Node.js", you are in the REPL — press Ctrl+D and open
+> **PowerShell** (Windows) or **Terminal** (macOS/Linux) instead.
 
 ```bash
+git clone -b claude/all-in-one-business-platform-haud19 https://github.com/dillonprice12380/personal-tools.git
+cd personal-tools
 npm install
-
-# Generate the key that encrypts stored API tokens, and keep it safe:
-echo "HELM_SECRET=$(openssl rand -hex 32)" >> .env
-
+npm run setup
 npm run build
 npm start
 ```
 
-Open http://localhost:4000 and create your account on first run.
+Run each line on its own — they are separate commands, not one long command.
 
-Helm reads `.env` from the working directory or its parent, so a `.env` at the
-repo root works whether you run from the root or from `server/`. Real
-environment variables always take precedence over the file.
+`npm run setup` writes a `.env` containing a freshly generated `HELM_SECRET`.
+It never overwrites an existing one, so it is safe to re-run.
 
-To try it with realistic demo data first:
+Then open <http://localhost:4000> and create your account on first run.
 
-```bash
-npm run seed     # creates demo@helm.local / helmdemo123 plus sample data
-```
+To browse realistic sample data first, run `npm run seed` **before** starting.
+It logs in as `demo@helm.local` / `helmdemo123`.
+
+> ⚠️ `npm run seed` clears the tasks, clients, invoices and transactions tables
+> before inserting samples. Only run it on a fresh install.
+
+Helm reads `.env` from the working directory, its parent, or the directory the
+server was installed in — so a `.env` at the repo root works however you start
+it. Real environment variables always take precedence over the file.
 
 ### Development
 
@@ -56,6 +64,9 @@ npm run dev        # API on :4000, Vite dev server on :5173 with an /api proxy
 npm run typecheck  # both workspaces
 npm test           # server unit tests
 ```
+
+Day to day: `Ctrl+C` stops it, `npm start` starts it again (no rebuild needed).
+After pulling changes, run `npm run build` first.
 
 ## Connecting the outside world
 
