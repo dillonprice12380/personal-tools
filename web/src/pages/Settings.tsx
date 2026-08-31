@@ -1,0 +1,222 @@
+import React, { useEffect, useState } from 'react';
+import { api, useApi } from '../lib/api';
+import { Banner, Card, Chip, ConfirmButton, Empty, Field, Modal, Stat } from '../components/ui';
+import { formatDate } from '../lib/format';
+
+type Credential = { id: number; service: string; label: string; fields: string[]; created_at: string };
+
+export function SettingsPage({ user }: { user: { email: string; name: string } }) {
+  const settings = useApi<Record<string, any>>('/settings');
+  const credentials = useApi<{ items: Credential[] }>('/settings/credentials');
+  const serpProviders = useApi<{ items: any[]; active: string }>('/seo-providers');
+
+  const [form, setForm] = useState<Record<string, any>>({});
+  const [saved, setSaved] = useState(false);
+  const [addingSerp, setAddingSerp] = useState(false);
+
+  useEffect(() => {
+    if (settings.data) setForm(settings.data);
+  }, [settings.data]);
+
+  const save = async (changes: Record<string, unknown>) => {
+    await api.patch('/settings', changes);
+    setForm((prev) => ({ ...prev, ...changes }));
+    setSaved(true);
+    window.setTimeout(() => setSaved(false), 2000);
+    void settings.reload();
+    void serpProviders.reload();
+  };
+
+  return (
+    <>
+      <header className="topbar">
+        <h1>Settings</h1>
+        <span className="spacer" />
+        {saved && <Chip tone="good">Saved</Chip>}
+      </header>
+
+      <div className="page stack" style={{ gap: 14 }}>
+        <div className="grid cols-2">
+          <Card title="Account">
+            <div className="stack">
+              <Stat label="Signed in as" value={user.name || user.email} sub={user.email} small />
+              <p className="small muted">
+                Helm is single-user by design — there is no sign-up, no sharing and no second account.
+              </p>
+            </div>
+          </Card>
+
+          <Card title="Business details">
+            <div className="stack">
+              <Field label="Business name">
+                <input
+                  value={form.businessName ?? ''}
+                  onChange={(e) => setForm({ ...form, businessName: e.target.value })}
+                  onBlur={(e) => save({ businessName: e.target.value })}
+                />
+              </Field>
+              <div className="field-row">
+                <Field label="Currency">
+                  <input
+                    value={form.currency ?? 'USD'}
+                    onChange={(e) => setForm({ ...form, currency: e.target.value })}
+                    onBlur={(e) => save({ currency: e.target.value.toUpperCase() })}
+                  />
+                </Field>
+                <Field label="Invoice prefix">
+                  <input
+                    value={form.invoicePrefix ?? 'INV-'}
+                    onChange={(e) => setForm({ ...form, invoicePrefix: e.target.value })}
+                    onBlur={(e) => save({ invoicePrefix: e.target.value })}
+                  />
+                </Field>
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        <Card title="Rank tracking">
+          <div className="stack">
+            <Field
+              label="SERP provider"
+              hint="Manual entry costs nothing. An API provider lets Helm check positions and build competitive briefs on its own."
+            >
+              <select
+                value={serpProviders.data?.active ?? 'manual'}
+                onChange={(e) => save({ seoSerpProvider: e.target.value })}
+              >
+                {(serpProviders.data?.items ?? []).map((p: any) => (
+                  <option key={p.id} value={p.id}>{p.label}</option>
+                ))}
+              </select>
+            </Field>
+
+            {serpProviders.data?.active !== 'manual' && (
+              <>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={!!form.seoAutoRankCheck}
+                    onChange={(e) => save({ seoAutoRankCheck: e.target.checked })}
+                  />
+                  Refresh rankings automatically each day
+                </label>
+                <Field label="Daily rank-check limit" hint="Caps how many paid API calls Helm makes per day.">
+                  <input
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={form.seoDailyRankLimit ?? 10}
+                    onChange={(e) => setForm({ ...form, seoDailyRankLimit: Number(e.target.value) })}
+                    onBlur={(e) => save({ seoDailyRankLimit: Number(e.target.value) })}
+                    style={{ width: 120 }}
+                  />
+                </Field>
+                <button className="btn" onClick={() => setAddingSerp(true)}>Set API key</button>
+              </>
+            )}
+          </div>
+        </Card>
+
+        <Card
+          title="Stored credentials"
+          actions={<span className="small muted">Encrypted with AES-256-GCM</span>}
+          padded={false}
+        >
+          {(credentials.data?.items ?? []).length ? (
+            <div className="table-wrap">
+              <table className="data">
+                <thead><tr><th>Service</th><th>Label</th><th>Fields</th><th>Added</th><th></th></tr></thead>
+                <tbody>
+                  {credentials.data!.items.map((cred) => (
+                    <tr key={cred.id}>
+                      <td>{cred.service}</td>
+                      <td className="muted">{cred.label || '—'}</td>
+                      <td>
+                        <span className="row wrap">
+                          {cred.fields.map((f) => <Chip key={f}>{f}</Chip>)}
+                        </span>
+                      </td>
+                      <td className="small muted">{formatDate(cred.created_at)}</td>
+                      <td className="right">
+                        <ConfirmButton
+                          onConfirm={async () => {
+                            await api.del(`/settings/credentials/${cred.id}`);
+                            void credentials.reload();
+                          }}
+                        >
+                          Delete
+                        </ConfirmButton>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <Empty icon="🔒" title="No credentials stored" hint="Connect a social account or a SERP provider to add one." />
+          )}
+        </Card>
+
+        <Card title="How your data is stored">
+          <ul className="small dim" style={{ margin: 0, paddingLeft: 18 }}>
+            <li>Everything lives in a single SQLite file on your machine — nothing is sent anywhere except the APIs you connect.</li>
+            <li>Third-party tokens are encrypted at rest with a key derived from <code>HELM_SECRET</code>, and the API never returns them.</li>
+            <li>Back up by copying the database file; restore by putting it back.</li>
+          </ul>
+        </Card>
+      </div>
+
+      {addingSerp && (
+        <SerpKeyForm
+          provider={serpProviders.data?.active ?? 'serpapi'}
+          onClose={() => setAddingSerp(false)}
+          onSaved={() => {
+            setAddingSerp(false);
+            void credentials.reload();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function SerpKeyForm({ provider, onClose, onSaved }: { provider: string; onClose: () => void; onSaved: () => void }) {
+  const [key, setKey] = useState('');
+  const [error, setError] = useState('');
+
+  return (
+    <Modal
+      title={`${provider} API key`}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>Cancel</button>
+          <button
+            className="btn primary"
+            disabled={!key.trim()}
+            onClick={async () => {
+              try {
+                await api.post('/settings/credentials', {
+                  service: 'serp',
+                  label: provider,
+                  data: { api_key: key.trim() },
+                });
+                onSaved();
+              } catch (err: any) {
+                setError(err?.message ?? 'Could not save');
+              }
+            }}
+          >
+            Save key
+          </button>
+        </>
+      }
+    >
+      <Banner tone="error">{error}</Banner>
+      <Field label="API key" hint="Stored encrypted; never returned by the API.">
+        <input type="password" autoFocus value={key} onChange={(e) => setKey(e.target.value)} />
+      </Field>
+    </Modal>
+  );
+}
