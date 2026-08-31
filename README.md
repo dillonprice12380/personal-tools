@@ -39,6 +39,10 @@ npm start
 
 Open http://localhost:4000 and create your account on first run.
 
+Helm reads `.env` from the working directory or its parent, so a `.env` at the
+repo root works whether you run from the root or from `server/`. Real
+environment variables always take precedence over the file.
+
 To try it with realistic demo data first:
 
 ```bash
@@ -127,6 +131,17 @@ Design decisions worth knowing:
 - **The crawler is polite**: same-origin only, obeys `robots.txt`, one request
   at a time with a delay, and a page cap per crawl.
 
+## Reaching it from your phone
+
+Helm binds to `127.0.0.1`, so by default nothing outside the machine can reach
+it. To use it from a phone, put it on a private network rather than the open
+internet — **[docs/REMOTE-ACCESS.md](docs/REMOTE-ACCESS.md)** walks through
+Tailscale (a private HTTPS URL only your own devices can open), Cloudflare
+Tunnel, and running Helm as a background service so it is always up.
+
+The UI is responsive and works on a phone; add it to your home screen and it
+behaves like an app.
+
 ## Backups
 
 Everything is in one SQLite file (`data/helm.db` by default). Copy it to back
@@ -136,6 +151,14 @@ stored API tokens cannot be decrypted.
 ## Security notes
 
 Helm has no TLS, no rate limiting and no second factor. It is built to run on
-your own machine or behind something that does. If you expose it to a network,
-put it behind a reverse proxy with HTTPS, and use a strong password — session
-cookies are `httpOnly` and set `secure` when `NODE_ENV=production`.
+your own machine or behind something that does.
+
+- It listens on `127.0.0.1` unless you set `HELM_HOST`, so it is not on your
+  network by accident.
+- Session cookies are `httpOnly`, and marked `Secure` when you set
+  `HELM_SECURE_COOKIES=1` — do that whenever it is served over HTTPS.
+- Only loopback is trusted as a proxy, so `X-Forwarded-*` headers cannot be
+  spoofed by a remote client.
+
+If you want it reachable beyond the machine it runs on, use a private tunnel
+rather than a forwarded port: see [docs/REMOTE-ACCESS.md](docs/REMOTE-ACCESS.md).

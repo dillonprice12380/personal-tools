@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
+import { config } from '../config.js';
 import { all, get, run } from '../db.js';
 import { hashPassword, randomToken, verifyPassword } from './crypto.js';
 import { HttpError } from './http.js';
@@ -72,7 +73,7 @@ export function setSessionCookie(res: Response, token: string) {
   res.cookie(COOKIE, token, {
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    secure: config.secureCookies,
     maxAge: SESSION_DAYS * 864e5,
   });
 }

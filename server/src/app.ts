@@ -16,6 +16,10 @@ import { dashboardRouter } from './routes/dashboard.js';
 
 export function createApp() {
   const app = express();
+  // A tunnel (tailscaled, cloudflared) connects from loopback and forwards
+  // X-Forwarded-* headers; trusting only loopback keeps those headers from
+  // being spoofable by a remote client.
+  app.set('trust proxy', 'loopback');
   app.use(express.json({ limit: '5mb' }));
   app.use(cookieParser());
 

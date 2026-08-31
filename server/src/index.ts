@@ -5,9 +5,17 @@ import { userCount } from './lib/auth.js';
 
 const app = createApp();
 
-app.listen(config.port, () => {
-  console.log(`[helm] API listening on http://localhost:${config.port}`);
+app.listen(config.port, config.host, () => {
+  console.log(`[helm] listening on http://${config.host}:${config.port}`);
   console.log(`[helm] database: ${config.dbPath}`);
+  if (config.host === '127.0.0.1') {
+    console.log('[helm] loopback only - use a tunnel for remote access (see docs/REMOTE-ACCESS.md)');
+  } else {
+    console.log(`[helm] reachable on the network at ${config.host} - make sure that is intended`);
+  }
+  if (!config.secureCookies) {
+    console.log('[helm] session cookies are not marked Secure (set HELM_SECURE_COOKIES=1 behind HTTPS)');
+  }
   if (userCount() === 0) {
     console.log('[helm] no account yet - open the app to create one');
   }
