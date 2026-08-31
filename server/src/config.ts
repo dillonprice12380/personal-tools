@@ -22,10 +22,33 @@ const envCandidates = [
   path.resolve(moduleDir, '../../.env'),
 ];
 
+/**
+ * Minimal KEY=VALUE reader, used on Node versions without
+ * process.loadEnvFile (added in 20.12). Matches its important behaviour:
+ * a variable already present in the environment is never overwritten.
+ */
+function loadEnvFallback(file: string) {
+  for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).replace(/^export\s+/, '').trim();
+    if (!key || key in process.env) continue;
+    let value = trimmed.slice(eq + 1).trim();
+    const quote = value[0];
+    if ((quote === '"' || quote === "'") && value.endsWith(quote) && value.length > 1) {
+      value = value.slice(1, -1);
+    }
+    process.env[key] = value;
+  }
+}
+
 for (const file of [...new Set(envCandidates)]) {
   try {
     if (!fs.existsSync(file)) continue;
-    process.loadEnvFile(file);
+    if (typeof process.loadEnvFile === 'function') process.loadEnvFile(file);
+    else loadEnvFallback(file);
     break;
   } catch {
     // A malformed .env must not stop the server from booting.
