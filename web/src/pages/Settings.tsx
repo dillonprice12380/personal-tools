@@ -5,10 +5,21 @@ import { formatDate } from '../lib/format';
 
 type Credential = { id: number; service: string; label: string; fields: string[]; created_at: string };
 
+type OAuthProvider = {
+  id: string;
+  label: string;
+  note?: string;
+  scopes: string[];
+  configured: boolean;
+  redirectUri: string;
+  clientIdLabel: string;
+};
+
 export function SettingsPage({ user }: { user: { email: string; name: string } }) {
   const settings = useApi<Record<string, any>>('/settings');
   const credentials = useApi<{ items: Credential[] }>('/settings/credentials');
   const serpProviders = useApi<{ items: any[]; active: string }>('/seo-providers');
+  const oauthProviders = useApi<{ items: OAuthProvider[] }>('/oauth/providers');
 
   const [form, setForm] = useState<Record<string, any>>({});
   const [saved, setSaved] = useState(false);
@@ -74,6 +85,17 @@ export function SettingsPage({ user }: { user: { email: string; name: string } }
             </div>
           </Card>
         </div>
+
+        <SocialApps
+          providers={oauthProviders.data?.items ?? []}
+          publicUrl={form.publicUrl ?? ''}
+          onPublicUrlChange={(v) => setForm({ ...form, publicUrl: v })}
+          onPublicUrlSave={(v) => save({ publicUrl: v })}
+          onChanged={() => {
+            void oauthProviders.reload();
+            void credentials.reload();
+          }}
+        />
 
         <Card title="Rank tracking">
           <div className="stack">
@@ -178,6 +200,148 @@ export function SettingsPage({ user }: { user: { email: string; name: string } }
         />
       )}
     </>
+  );
+}
+
+/**
+ * Registration details for the networks that use a browser OAuth flow. The
+ * client id and secret come from each network's developer portal; Helm stores
+ * them encrypted and never returns them.
+ */
+function SocialApps({
+  providers,
+  publicUrl,
+  onPublicUrlChange,
+  onPublicUrlSave,
+  onChanged,
+}: {
+  providers: OAuthProvider[];
+  publicUrl: string;
+  onPublicUrlChange: (value: string) => void;
+  onPublicUrlSave: (value: string) => void;
+  onChanged: () => void;
+}) {
+  const [editing, setEditing] = useState<OAuthProvider | null>(null);
+
+  return (
+    <Card
+      title="Social network apps"
+      actions={<span className="small muted">LinkedIn, Facebook, Instagram, TikTok</span>}
+    >
+      <div className="stack">
+        <Field
+          label="Public URL"
+          hint="Where Helm is reachable. Must match the redirect URI you register with each network."
+        >
+          <input
+            value={publicUrl}
+            placeholder="http://localhost:4000"
+            onChange={(e) => onPublicUrlChange(e.target.value)}
+            onBlur={(e) => onPublicUrlSave(e.target.value)}
+          />
+        </Field>
+
+        <div className="table-wrap">
+          <table className="data">
+            <thead>
+              <tr><th>Network</th><th>App</th><th>Redirect URI to register</th><th></th></tr>
+            </thead>
+            <tbody>
+              {providers.map((p) => (
+                <tr key={p.id}>
+                  <td>
+                    {p.label}
+                    {p.note && <div className="small muted" style={{ maxWidth: 320 }}>{p.note}</div>}
+                  </td>
+                  <td>
+                    {p.configured ? <Chip tone="good">configured</Chip> : <Chip tone="warning">not set</Chip>}
+                  </td>
+                  <td>
+                    <code className="small" style={{ wordBreak: 'break-all' }}>{p.redirectUri}</code>
+                  </td>
+                  <td className="right">
+                    <div className="row" style={{ justifyContent: 'flex-end' }}>
+                      <button className="btn sm" onClick={() => setEditing(p)}>
+                        {p.configured ? 'Edit keys' : 'Add keys'}
+                      </button>
+                      {p.configured && (
+                        <a className="btn sm primary" href={`/api/oauth/${p.id}/start`}>
+                          Connect
+                        </a>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="small muted">
+          X uses keys you issue yourself in its developer portal, so it is added directly on the
+          Social → Accounts tab rather than here.
+        </p>
+      </div>
+
+      {editing && (
+        <AppKeyForm provider={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); onChanged(); }} />
+      )}
+    </Card>
+  );
+}
+
+function AppKeyForm({
+  provider,
+  onClose,
+  onSaved,
+}: {
+  provider: OAuthProvider;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
+  const [error, setError] = useState('');
+
+  return (
+    <Modal
+      title={`${provider.label} app keys`}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>Cancel</button>
+          <button
+            className="btn primary"
+            disabled={!clientId.trim() || !clientSecret.trim()}
+            onClick={async () => {
+              try {
+                await api.post(`/oauth/app/${provider.id}`, {
+                  client_id: clientId.trim(),
+                  client_secret: clientSecret.trim(),
+                });
+                onSaved();
+              } catch (err: any) {
+                setError(err?.message ?? 'Could not save');
+              }
+            }}
+          >
+            Save
+          </button>
+        </>
+      }
+    >
+      <Banner tone="error">{error}</Banner>
+      <p className="small muted">
+        Register this redirect URI in the {provider.label} developer portal, exactly as shown:
+      </p>
+      <code className="small" style={{ wordBreak: 'break-all' }}>{provider.redirectUri}</code>
+      <p className="small muted">Scopes requested: {provider.scopes.join(', ')}</p>
+      <Field label={provider.clientIdLabel}>
+        <input autoFocus value={clientId} onChange={(e) => setClientId(e.target.value)} />
+      </Field>
+      <Field label="client_secret">
+        <input type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} />
+      </Field>
+    </Modal>
   );
 }
 

@@ -1,6 +1,7 @@
 import { config } from '../config.js';
 import { all, get, getSetting, logActivity, run } from '../db.js';
 import { purgeExpiredSessions } from '../lib/auth.js';
+import { purgeOAuthStates } from '../routes/oauth.js';
 import { duePostIds, publishPost } from './social/publisher.js';
 import { checkRank, recordRanking, keywordsToRefresh, serpProviderId } from './seo/serp.js';
 import { advance, type Cadence } from './recurrence.js';
@@ -83,6 +84,7 @@ export async function tick() {
     processRecurringTransactions();
     await processRankChecks();
     purgeExpiredSessions();
+    purgeOAuthStates();
   } catch (err) {
     console.error('[helm] scheduler tick failed:', err);
   } finally {

@@ -1,22 +1,60 @@
 import { all, get, logActivity, run } from '../../db.js';
-import { decryptJson } from '../../lib/crypto.js';
+import { decryptJson, encryptJson } from '../../lib/crypto.js';
 import { parseJson } from '../../lib/http.js';
-import { getProvider } from './providers.js';
+import { getProvider, OAUTH_PROVIDER_IDS } from './providers.js';
+import { getOAuth2Config, needsRefresh, refreshTokens } from './oauth2.js';
+import { appCreds } from '../../routes/oauth.js';
 
 export type TargetStatus = 'pending' | 'published' | 'failed' | 'manual_required';
 
 const MAX_ATTEMPTS = 3;
 
-function credsFor(account: any): Record<string, string> {
+/**
+ * Decrypt an account's credentials, refreshing the access token first when it
+ * is expired or nearly so. A refreshed token is written back immediately, so
+ * one refresh serves every later publish.
+ */
+async function credsFor(account: any): Promise<Record<string, string>> {
   if (!account.credential_id) return {};
   const row = get<{ data_enc: string }>('SELECT data_enc FROM credentials WHERE id = ?', [
     account.credential_id,
   ]);
   if (!row) return {};
+
+  let creds: Record<string, any>;
   try {
-    return decryptJson<Record<string, string>>(row.data_enc);
+    creds = decryptJson<Record<string, any>>(row.data_enc);
   } catch {
     throw new Error('Stored credential could not be decrypted (has HELM_SECRET changed?)');
+  }
+
+  const isOAuth = OAUTH_PROVIDER_IDS.includes(account.platform);
+  if (!isOAuth || !creds.refresh_token || !needsRefresh(creds)) return creds;
+
+  const app = appCreds(account.platform);
+  if (!app) return creds;
+
+  try {
+    const provider = getOAuth2Config(account.platform);
+    const fresh = await refreshTokens(provider, {
+      clientId: app.clientId,
+      clientSecret: app.clientSecret,
+      refreshToken: creds.refresh_token,
+    });
+    // Providers often omit unchanged fields; merge rather than replace.
+    const merged = { ...creds, ...fresh };
+    run('UPDATE credentials SET data_enc = ? WHERE id = ?', [
+      encryptJson(merged),
+      account.credential_id,
+    ]);
+    logActivity('social_accounts', account.account_id ?? null, 'token_refresh', account.platform);
+    return merged;
+  } catch (err) {
+    throw new Error(
+      `${account.platform} access token expired and could not be refreshed - reconnect the account. (${String(
+        (err as Error)?.message ?? err
+      ).slice(0, 120)})`
+    );
   }
 }
 
@@ -100,7 +138,7 @@ export async function publishPost(postId: number, opts: { retryFailed?: boolean 
         body: target.body_override || post.body,
         link: post.link,
         media: parseJson<string[]>(post.media_json, []),
-        creds: credsFor(target),
+        creds: await credsFor(target),
         accountConfig,
       });
 

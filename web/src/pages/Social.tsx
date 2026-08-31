@@ -29,6 +29,7 @@ type Post = {
   id: number;
   body: string;
   link: string;
+  media: string[];
   campaign: string;
   status: string;
   scheduled_at: string | null;
@@ -48,6 +49,14 @@ const STATUS_TONE: Record<string, 'good' | 'warning' | 'critical' | 'accent' | '
 
 export function SocialPage() {
   const [tab, setTab] = useState<'queue' | 'calendar' | 'accounts'>('queue');
+  const [connectNotice, setConnectNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(
+    () => {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('connected')) return { tone: 'ok', text: `${params.get('connected')} connected.` };
+      if (params.get('connect_error')) return { tone: 'error', text: params.get('connect_error')! };
+      return null;
+    }
+  );
   const [composing, setComposing] = useState<Post | 'new' | null>(null);
 
   const posts = useApi<ListResponse<Post>>('/social-posts?limit=200');
@@ -75,6 +84,22 @@ export function SocialPage() {
       </header>
 
       <div className="page stack" style={{ gap: 14 }}>
+        {connectNotice && (
+          <div className={`banner ${connectNotice.tone}`}>
+            <div className="row">
+              <span style={{ flex: 1 }}>{connectNotice.text}</span>
+              <button
+                className="btn sm ghost"
+                onClick={() => {
+                  setConnectNotice(null);
+                  window.history.replaceState({}, '', '/social');
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
         <div className="grid cols-4">
           <Card><Stat label="Scheduled" value={num(items.filter((p) => p.status === 'scheduled').length)} /></Card>
           <Card><Stat label="Drafts" value={num(items.filter((p) => p.status === 'draft').length)} /></Card>
@@ -348,6 +373,7 @@ function Composer({
   const [scheduledAt, setScheduledAt] = useState(
     post?.scheduled_at ? post.scheduled_at.replace(' ', 'T').slice(0, 16) : ''
   );
+  const [mediaText, setMediaText] = useState((post?.media ?? []).join('\n'));
   const [selected, setSelected] = useState<number[]>(post?.targets.map((t) => t.account_id) ?? []);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -365,6 +391,10 @@ function Composer({
         body,
         link,
         campaign,
+        media_json: mediaText
+          .split(/[\n,]/)
+          .map((m: string) => m.trim())
+          .filter(Boolean),
         scheduled_at: scheduledAt ? scheduledAt.replace('T', ' ') : null,
         status: scheduledAt ? 'scheduled' : 'draft',
         account_ids: selected,
@@ -427,6 +457,18 @@ function Composer({
         </Field>
       </div>
 
+      <Field
+        label="Media URLs"
+        hint="One per line. Instagram and TikTok can only post media hosted at a public https:// URL - they cannot take a local file."
+      >
+        <textarea
+          value={mediaText}
+          onChange={(e) => setMediaText(e.target.value)}
+          placeholder="https://example.com/image.jpg"
+          style={{ minHeight: 60 }}
+        />
+      </Field>
+
       <Field label="Schedule for" hint="Leave empty to keep it as a draft">
         <input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} />
       </Field>
@@ -474,7 +516,12 @@ function AccountsTab({
   return (
     <Card
       title="Connected accounts"
-      actions={<button className="btn sm" onClick={() => setAdding(true)}>+ Add account</button>}
+      actions={
+        <div className="row">
+          <a className="btn sm" href="/settings">Connect LinkedIn / Meta / TikTok</a>
+          <button className="btn sm primary" onClick={() => setAdding(true)}>+ Add account</button>
+        </div>
+      }
     >
       {accounts.length ? (
         <div className="table-wrap">
@@ -522,7 +569,7 @@ function AccountsTab({
         <Empty
           icon="◇"
           title="No accounts connected"
-          hint="Add a Mastodon, Bluesky, Discord, Telegram or webhook target — or a manual reminder for networks without an open API."
+          hint="Add X, Mastodon, Bluesky, Discord, Telegram or a webhook here. LinkedIn, Facebook, Instagram and TikTok connect from Settings → Social network apps."
         />
       )}
 

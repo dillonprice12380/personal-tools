@@ -13,7 +13,7 @@ sharing: the first account you create is the only account it will ever have.
 | Module | What it does | Replaces |
 |---|---|---|
 | **Tasks** | Projects, lists, subtasks, tags, comments, priorities, recurring tasks, board / list / "my day" views, time tracking with a live timer | Basecamp, ClickUp |
-| **Social** | Multi-account composer, per-network character limits, scheduling queue, month calendar, background publishing with retries, failure reporting | Buffer, Hootsuite |
+| **Social** | Multi-account composer for X, LinkedIn, Facebook Pages, Instagram, TikTok, Mastodon, Bluesky, Discord, Telegram and webhooks; per-network character limits, scheduling queue, month calendar, background publishing with retries and token refresh | Buffer, Hootsuite |
 | **SEO & AEO** | Site crawler, technical on-page audit, answer-engine readiness scoring, rank tracking, competitor-derived content briefs | Semrush, Ahrefs |
 | **Budget** | Accounts, transactions, envelope budgets, recurring bills, CSV import with duplicate detection, transfers, savings goals, cashflow reports | YNAB, Monarch |
 | **Business** | Clients, deal pipeline, invoices with payments, bill-tracked-time-to-invoice, KPI tracking, notes | Bonsai, Harvest |

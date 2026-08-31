@@ -7,6 +7,7 @@ import { requireAuth } from './lib/auth.js';
 import { HttpError } from './lib/http.js';
 import { authRouter } from './routes/auth.js';
 import { settingsRouter } from './routes/settings.js';
+import { oauthRouter } from './routes/oauth.js';
 import { tasksRouter } from './routes/tasks.js';
 import { socialRouter } from './routes/social.js';
 import { seoRouter } from './routes/seo.js';
@@ -30,6 +31,7 @@ export function createApp() {
   const api = express.Router();
   api.use(requireAuth);
   api.use('/settings', settingsRouter);
+  api.use('/oauth', oauthRouter);
   api.use('/dashboard', dashboardRouter);
   api.use(tasksRouter);
   api.use(socialRouter);

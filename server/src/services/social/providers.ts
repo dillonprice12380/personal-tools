@@ -186,9 +186,32 @@ const manual: Provider = {
   },
 };
 
+import {
+  facebookProvider,
+  instagramProvider,
+  linkedinProvider,
+  tiktokProvider,
+  xProvider,
+} from './networks.js';
+
 export const PROVIDERS: Record<string, Provider> = Object.fromEntries(
-  [mastodon, bluesky, discord, telegram, webhook, manual].map((p) => [p.id, p])
+  [
+    xProvider,
+    linkedinProvider,
+    facebookProvider,
+    instagramProvider,
+    tiktokProvider,
+    mastodon,
+    bluesky,
+    discord,
+    telegram,
+    webhook,
+    manual,
+  ].map((p) => [p.id, p])
 );
+
+/** Providers connected through a browser OAuth flow rather than pasted keys. */
+export const OAUTH_PROVIDER_IDS = ['linkedin', 'facebook', 'instagram', 'tiktok'];
 
 export function getProvider(id: string): Provider {
   const provider = PROVIDERS[id];
