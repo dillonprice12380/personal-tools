@@ -37,6 +37,14 @@ export type OAuth2Config = {
   tokenRequestIn?: 'body' | 'query';
   /** Human-readable note surfaced in the UI. */
   note?: string;
+  /**
+   * Shape of a valid client id, where the provider uses an unmistakable one.
+   * Checked when app keys are saved so a wrong value fails here, with an
+   * explanation, rather than as an opaque error on the provider's login page.
+   */
+  clientIdPattern?: RegExp;
+  clientIdHint?: string;
+  clientSecretHint?: string;
 };
 
 export const OAUTH2_PROVIDERS: Record<string, OAuth2Config> = {
@@ -84,6 +92,10 @@ export const OAUTH2_PROVIDERS: Record<string, OAuth2Config> = {
     extraAuthParams: { access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true' },
     tokenRequestIn: 'body',
     note: 'Read-only access to your Search Console data: the queries you actually rank for, straight from Google.',
+    clientIdPattern: /\.apps\.googleusercontent\.com$/i,
+    clientIdHint:
+      'A Google client id ends in ".apps.googleusercontent.com" - for example 123456789012-abc123.apps.googleusercontent.com. Create it under Google Cloud Console > APIs & Services > Credentials > Create credentials > OAuth client ID > Web application. An API key or project number will not work.',
+    clientSecretHint: 'Google client secrets usually begin with "GOCSPX-".',
   },
   tiktok: {
     id: 'tiktok',
@@ -97,6 +109,25 @@ export const OAUTH2_PROVIDERS: Record<string, OAuth2Config> = {
     note: 'Video only. Direct publishing requires an audited app; unaudited apps can send drafts to your TikTok inbox.',
   },
 };
+
+/**
+ * Validate app keys before they are stored. Returns an error message, or null.
+ */
+export function validateAppKeys(
+  provider: OAuth2Config,
+  clientId: string,
+  clientSecret: string
+): string | null {
+  const id = clientId.trim();
+  const secret = clientSecret.trim();
+  if (!id || !secret) return 'Both a client id and a client secret are required.';
+  if (/\s/.test(id)) return 'The client id contains a space - check for a copy/paste slip.';
+
+  if (provider.clientIdPattern && !provider.clientIdPattern.test(id)) {
+    return `That does not look like a ${provider.label} client id. ${provider.clientIdHint ?? ''}`.trim();
+  }
+  return null;
+}
 
 export function getOAuth2Config(id: string): OAuth2Config {
   const provider = OAUTH2_PROVIDERS[id];

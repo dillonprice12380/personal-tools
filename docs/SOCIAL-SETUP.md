@@ -37,6 +37,43 @@ character for character — a trailing slash difference is enough to fail.
 
 ---
 
+## Google Search Console
+
+Powers the SEO module rather than posting anywhere. Read-only.
+
+1. Go to <https://console.cloud.google.com> and create a project (or pick one)
+2. **APIs & Services → Library** → search **"Google Search Console API"** →
+   **Enable**. Skipping this is why a connection that looked fine returns 403
+   on the first sync.
+3. **APIs & Services → OAuth consent screen**
+   - User type **External**, fill in the app name and your email
+   - Under **Test users**, **add your own Google address**. While the app is in
+     Testing mode, only listed test users can authorise it — otherwise you get
+     "access blocked: app has not completed verification"
+4. **APIs & Services → Credentials → Create credentials → OAuth client ID**
+   - Application type: **Web application**
+   - Under **Authorised redirect URIs**, add exactly what Helm shows, e.g.
+     `http://localhost:4000/api/oauth/google/callback`
+   - Google permits plain `http` for `localhost`, so a tunnel is not required
+5. Copy the **Client ID** and **Client secret**
+6. In Helm: **Settings → Connected apps → Google Search Console → Add keys**,
+   then **Connect**
+7. Open **SEO & AEO → Search Console**, choose your property, and **Sync**
+
+### If Google rejects the sign-in
+
+| What Google says | What it means |
+|---|---|
+| **"The OAuth client was not found" / `invalid_client`** | The client id is not one Google knows. Usually an API key, a project number, or a client that was never created. A valid one ends in `.apps.googleusercontent.com` — Helm now refuses anything else at save time. |
+| `redirect_uri_mismatch` | The Authorised redirect URI does not match byte for byte. Check the port, and that there is no trailing slash. Your **Public URL** in Helm must match too. |
+| "App has not completed verification" | Add your own email under **Test users** on the consent screen. |
+| Connects, then 403 on sync | The **Google Search Console API** is not enabled for the project (step 2). |
+| "Property not found" or an empty list | The Google account you authorised is not verified on that property in Search Console. |
+
+Two things about the data itself: Search Console reports on a **2–3 day lag**,
+and it only holds data from when the property was verified — it does not
+backfill history from before that.
+
 ## X (Twitter)
 
 The only one with no browser flow — you issue tokens for your own account

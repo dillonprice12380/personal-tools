@@ -13,6 +13,8 @@ type OAuthProvider = {
   configured: boolean;
   redirectUri: string;
   clientIdLabel: string;
+  clientIdHint?: string;
+  clientSecretHint?: string;
 };
 
 export function SettingsPage({ user }: { user: { email: string; name: string } }) {
@@ -338,10 +340,15 @@ function AppKeyForm({
       </p>
       <code className="small" style={{ wordBreak: 'break-all' }}>{provider.redirectUri}</code>
       <p className="small muted">Scopes requested: {provider.scopes.join(', ')}</p>
-      <Field label={provider.clientIdLabel}>
-        <input autoFocus value={clientId} onChange={(e) => setClientId(e.target.value)} />
+      <Field label={provider.clientIdLabel} hint={provider.clientIdHint}>
+        <input
+          autoFocus
+          value={clientId}
+          onChange={(e) => setClientId(e.target.value)}
+          placeholder={provider.id === 'google' ? '…apps.googleusercontent.com' : ''}
+        />
       </Field>
-      <Field label="client_secret">
+      <Field label="client_secret" hint={provider.clientSecretHint}>
         <input type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} />
       </Field>
     </Modal>

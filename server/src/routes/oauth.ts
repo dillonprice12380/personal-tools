@@ -10,6 +10,7 @@ import {
   exchangeCode,
   getOAuth2Config,
   redirectUri,
+  validateAppKeys,
 } from '../services/social/oauth2.js';
 import { resolveIdentity } from '../services/social/networks.js';
 
@@ -47,6 +48,8 @@ oauthRouter.get(
         configured: !!appCreds(p.id),
         redirectUri: redirectUri(p.id),
         clientIdLabel: p.clientIdParam ?? 'client_id',
+        clientIdHint: p.clientIdHint,
+        clientSecretHint: p.clientSecretHint,
       })),
     });
   })
@@ -58,12 +61,17 @@ oauthRouter.post(
   wrap((req, res) => {
     const provider = getOAuth2Config(req.params.provider);
     requireFields(req.body ?? {}, ['client_id', 'client_secret']);
+    const invalid = validateAppKeys(provider, req.body.client_id, req.body.client_secret);
+    if (invalid) throw badRequest(invalid);
     // One app record per provider - replace rather than accumulate.
     run('DELETE FROM credentials WHERE service = ?', [`app:${provider.id}`]);
     run('INSERT INTO credentials (service, label, data_enc) VALUES (?, ?, ?)', [
       `app:${provider.id}`,
       `${provider.label} app`,
-      encryptJson({ client_id: req.body.client_id, client_secret: req.body.client_secret }),
+      encryptJson({
+        client_id: String(req.body.client_id).trim(),
+        client_secret: String(req.body.client_secret).trim(),
+      }),
     ]);
     res.status(201).json({ ok: true, redirectUri: redirectUri(provider.id) });
   })

@@ -53,8 +53,10 @@ keyword report — it is strictly better data. Semrush's advantage is
 **competitors' sites**, where you have no Search Console access.
 
 Set it up: **Settings → Connected apps → Google Search Console → Add keys**,
-then **Connect**. See [SOCIAL-SETUP.md](SOCIAL-SETUP.md) for creating the Google
-Cloud app; the scope requested is read-only.
+then **Connect**. Full steps, including the Google Cloud project and the two
+settings people usually miss, are in
+[SOCIAL-SETUP.md](SOCIAL-SETUP.md#google-search-console) — along with a table of
+what each Google error message actually means. The scope requested is read-only.
 
 ### What you get once it is synced
 
