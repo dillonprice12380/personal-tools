@@ -1,0 +1,55 @@
+{
+  "output": "out/helm-explainer.mp4",
+  "preset": "youtube",
+  "fps": 30,
+  "fade": 0.3,
+  "theme": {
+    "background": { "type": "gradient", "from": "#0b1220", "to": "#1b2a4a", "angle": 120 },
+    "accentColor": "#38bdf8"
+  },
+  "captions": { "maxCharsPerLine": 42, "maxLines": 2 },
+  "scenes": [
+    {
+      "id": "intro",
+      "narration": {
+        "path": "narration/01-intro.wav",
+        "text": "Helm replaces a stack of monthly subscriptions with one application, one database, and no recurring bill."
+      },
+      "title": "What is Helm?",
+      "body": "A self-hosted business operating system for exactly one person."
+    },
+    {
+      "id": "modules",
+      "narration": {
+        "path": "narration/02-modules.wav",
+        "text": "Six modules share one SQLite database. Tracked time becomes an invoice line, an invoice payment becomes a bank transaction, and an overdue invoice sits in the same alert list as a failed social post."
+      },
+      "title": "One database, six modules",
+      "bullets": [
+        "Tasks and time tracking",
+        "Social scheduling",
+        "SEO and answer-engine audits",
+        "Budgeting and cashflow"
+      ]
+    },
+    {
+      "id": "offline",
+      "narration": {
+        "path": "narration/03-offline.wav",
+        "text": "It works fully offline. Every integration is optional, and each one degrades to a manual workflow rather than disappearing."
+      },
+      "title": "Offline first",
+      "body": "No account, no telemetry, no third party holding your data."
+    },
+    {
+      "id": "outro",
+      "narration": {
+        "path": "narration/04-outro.wav",
+        "text": "Clone the repository, run npm install and npm start, then open localhost port four thousand. The first account you create is the only account it will ever have."
+      },
+      "padEnd": 1.2,
+      "title": "Getting started",
+      "body": "npm install && npm run setup && npm start"
+    }
+  ]
+}

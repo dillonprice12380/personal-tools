@@ -18,6 +18,7 @@ sharing: the first account you create is the only account it will ever have.
 | **Budget** | Accounts, transactions, envelope budgets, recurring bills, CSV import with duplicate detection, transfers, savings goals, cashflow reports | YNAB, Monarch |
 | **Business** | Clients, deal pipeline, invoices with payments, bill-tracked-time-to-invoice, KPI tracking, notes | Bonsai, Harvest |
 | **Dashboard** | One cross-module view: net worth, revenue, workload, queue health, search visibility, and a single "needs attention" list drawn from every module | Geckoboard |
+| **Video** | Renders narrated explainer videos from a JSON spec — burnt-in captions, `.srt`/`.vtt` sidecars, frame-exact audio sync, and a verification pass over the finished file | Descript, Camtasia |
 
 The modules share one SQLite database, which is the point: tracked time becomes
 an invoice line, an invoice payment becomes a bank transaction, and an overdue
@@ -102,6 +103,24 @@ Under **Settings → Rank tracking**, pick:
 The crawler, on-page audit and AEO scoring never call a third party — they fetch
 your own pages and analyse them locally.
 
+## Making videos
+
+Helm renders narrated explainer videos from a JSON spec — the scenes, the words
+on screen and your narration audio in, an MP4 with burnt-in captions out:
+
+```bash
+npm run video -- examples/video/explainer.json --check   # validate, print the timeline
+npm run video -- examples/video/explainer.json           # render and verify
+```
+
+It runs offline; ffmpeg ships as a dependency. Scene lengths are taken from the
+narration files, the audio track is built to the frame count sample by sample,
+and the finished file is decoded and checked against the spec before the render
+reports success — a mismatch is an error, not a warning. Text that will not fit
+its box stops the render rather than being clipped.
+
+**[docs/VIDEO.md](docs/VIDEO.md)** is the spec reference.
+
 ## How this compares to Semrush and Moz
 
 Honestly: **[docs/SEO-DATA.md](docs/SEO-DATA.md)** sets out what is achievable
@@ -135,7 +154,9 @@ server/         Express + better-sqlite3 API
   src/lib/crud.ts     route factory backing the ~30 resource endpoints
   src/routes/         one file per module, plus the cross-module dashboard
   src/services/       crawler, AEO analyser, SERP clients, publishers, scheduler
+  src/services/video/ spec validation, frame timing, layout, encoding, verification
 web/            React + Vite SPA (hand-rolled SVG charts, no chart library)
+examples/video/ a complete example video spec
 ```
 
 Design decisions worth knowing:

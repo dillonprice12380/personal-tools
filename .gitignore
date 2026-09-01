@@ -10,3 +10,7 @@ data/
 .DS_Store
 *.log
 coverage/
+
+# Rendered video output
+out/
+*.mp4
