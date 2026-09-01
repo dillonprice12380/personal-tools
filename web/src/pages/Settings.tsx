@@ -335,6 +335,38 @@ function AppKeyForm({
       }
     >
       <Banner tone="error">{error}</Banner>
+
+      {provider.id === 'google' && (
+        <div className="banner" style={{ lineHeight: 1.55 }}>
+          <strong>Where these come from</strong>
+          <ol style={{ margin: '6px 0 0 18px', padding: 0 }}>
+            <li>
+              <a href="https://console.cloud.google.com/apis/library/searchconsole.googleapis.com" target="_blank" rel="noreferrer noopener">
+                Enable the Search Console API
+              </a>
+            </li>
+            <li>
+              <a href="https://console.cloud.google.com/auth/audience" target="_blank" rel="noreferrer noopener">
+                Google Auth Platform → Audience
+              </a>{' '}
+              → under <strong>Test users</strong>, add your own Google address
+            </li>
+            <li>
+              <a href="https://console.cloud.google.com/auth/clients" target="_blank" rel="noreferrer noopener">
+                Google Auth Platform → Clients
+              </a>{' '}
+              → <strong>Create client</strong> → type <strong>Web application</strong> → add the
+              redirect URI below
+            </li>
+          </ol>
+          <div className="small muted" style={{ marginTop: 6 }}>
+            On older consoles those last two live under APIs &amp; Services → OAuth consent screen
+            and → Credentials. Check the project picker at the top matches the project where you
+            enabled the API.
+          </div>
+        </div>
+      )}
+
       <p className="small muted">
         Register this redirect URI in the {provider.label} developer portal, exactly as shown:
       </p>
