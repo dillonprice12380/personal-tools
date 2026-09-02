@@ -285,6 +285,43 @@ CREATE TABLE IF NOT EXISTS social_metrics (
   impressions INTEGER NOT NULL DEFAULT 0
 );
 
+-- --------------------------------------------------------------- video ----
+-- Narration audio and imagery uploaded for videos. Files live under
+-- data/video/assets. The filename column is the name on disk, chosen by Helm
+-- and never client-supplied, so a spec can only ever name a file Helm wrote.
+CREATE TABLE IF NOT EXISTS video_assets (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind          TEXT NOT NULL DEFAULT 'audio',   -- audio|image
+  filename      TEXT NOT NULL UNIQUE,
+  original_name TEXT NOT NULL DEFAULT '',
+  mime          TEXT NOT NULL DEFAULT '',
+  bytes         INTEGER NOT NULL DEFAULT 0,
+  duration_seconds REAL,                         -- audio only, measured on upload
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS video_projects (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  name          TEXT NOT NULL DEFAULT 'Untitled video',
+  spec_json     TEXT NOT NULL DEFAULT '{}',
+  status        TEXT NOT NULL DEFAULT 'draft',   -- draft|queued|rendering|ready|failed
+  progress      REAL NOT NULL DEFAULT 0,         -- 0..1 while rendering
+  -- Filename under data/video/renders. Unguessable, because the file is served
+  -- without a session so that Instagram and TikTok can fetch it.
+  output_file   TEXT NOT NULL DEFAULT '',
+  captions_file TEXT NOT NULL DEFAULT '',
+  duration_seconds REAL,
+  width         INTEGER,
+  height        INTEGER,
+  fps           INTEGER,
+  frames        INTEGER,
+  error         TEXT NOT NULL DEFAULT '',
+  rendered_at   TEXT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_video_projects_status ON video_projects(status);
+
 -- ----------------------------------------------------------- seo / aeo ----
 CREATE TABLE IF NOT EXISTS seo_sites (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,

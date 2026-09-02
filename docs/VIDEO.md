@@ -45,6 +45,53 @@ Most of this module is checks. The rules it holds itself to:
 Everything above is covered by tests in `server/test/video-*.test.ts`,
 including tests that the verifier rejects a file that does not match.
 
+## In the app
+
+**Social → Videos** does the same thing through the UI, and the composer can
+attach a finished render to a post.
+
+1. **Upload narration.** Under *Narration and images*, add the audio your scenes
+   refer to. Helm decodes each file as it arrives, so anything ffmpeg cannot read
+   is rejected there rather than failing a render ten minutes later. The upload
+   is stored under `data/video/assets` with a name Helm chooses; that name is
+   what a scene's `narration.path` refers to.
+2. **Describe the scenes.** *New video* opens an editor holding the spec as JSON.
+   *Check* validates it and prints the timeline without rendering anything, and
+   *Preview frame* rasterises a single frame so you can see the layout in about a
+   second rather than waiting for a render.
+3. **Render.** *Save and render* queues it. Rendering happens in a separate
+   process, one video at a time, so the rest of Helm stays responsive; progress
+   is written to the database as it goes.
+4. **Attach.** In the composer, *Attach a video* appends the render's URL to the
+   post's media list. From there it is an ordinary attachment — scheduling,
+   publishing and retries treat it like any other media URL.
+
+Editing a spec puts the project back to `draft`, which takes it out of the
+composer's list, but leaves the rendered file in place: its URL may already be
+attached to a post that went out. Deleting the project removes the file.
+
+### Reaching the video from the outside
+
+Renders are served from `/media/video/<name>` **without a session**, because
+Instagram and TikTok fetch attached media themselves and cannot present a
+cookie. Each filename carries 96 bits of randomness and a re-render always gets
+a new one, so a render is reachable only by someone holding its URL.
+
+That still only works if the URL resolves from the outside. Set `HELM_PUBLIC_URL`
+to the address Helm answers on — the Tailscale or Cloudflare Tunnel hostname from
+[REMOTE-ACCESS.md](REMOTE-ACCESS.md) — and attached URLs are built from it.
+Without it they are built from the request's own origin, which is fine for the
+networks that take an upload or a link, and not enough for the ones that fetch.
+
+### Specs from the API are confined
+
+A spec written by hand and run through the CLI may name any file on the machine:
+you are the one running it. A spec stored in Helm may not. Every path in it must
+resolve inside `data/video/assets`, symlinks included, and it cannot choose its
+own font file — otherwise `{"type": "image", "path": "../../.env"}` would embed
+that file into a video as a data URI. The render's output path is likewise chosen
+by Helm and never taken from the spec.
+
 ## Working on a spec
 
 ```bash

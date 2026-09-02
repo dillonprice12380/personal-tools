@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { api, useApi, type ListResponse } from '../lib/api';
 import { Banner, Card, Chip, ConfirmButton, Empty, Field, Modal, Stat, Tabs } from '../components/ui';
 import { formatDate, formatDateTime, num } from '../lib/format';
+import { VideoAttach, VideoTab } from '../components/video';
 
 type Account = {
   id: number;
@@ -48,7 +49,7 @@ const STATUS_TONE: Record<string, 'good' | 'warning' | 'critical' | 'accent' | '
 };
 
 export function SocialPage() {
-  const [tab, setTab] = useState<'queue' | 'calendar' | 'accounts'>('queue');
+  const [tab, setTab] = useState<'queue' | 'calendar' | 'videos' | 'accounts'>('queue');
   const [connectNotice, setConnectNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(
     () => {
       const params = new URLSearchParams(window.location.search);
@@ -116,6 +117,7 @@ export function SocialPage() {
           tabs={[
             { id: 'queue', label: 'Queue', count: items.length },
             { id: 'calendar', label: 'Calendar' },
+            { id: 'videos', label: 'Videos' },
             { id: 'accounts', label: 'Accounts', count: accounts.data?.items.length },
           ]}
           active={tab}
@@ -129,6 +131,8 @@ export function SocialPage() {
         )}
 
         {tab === 'calendar' && <CalendarView posts={items} onEdit={(p) => setComposing(p)} />}
+
+        {tab === 'videos' && <VideoTab />}
 
         {tab === 'accounts' && (
           <AccountsTab
@@ -468,6 +472,17 @@ function Composer({
           style={{ minHeight: 60 }}
         />
       </Field>
+
+      <VideoAttach
+        onAttach={(url) =>
+          setMediaText((current) => {
+            const lines = current.split('\n').map((l) => l.trim()).filter(Boolean);
+            // Attaching the same render twice would post it twice.
+            if (lines.includes(url)) return current;
+            return [...lines, url].join('\n');
+          })
+        }
+      />
 
       <Field label="Schedule for" hint="Leave empty to keep it as a draft">
         <input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} />

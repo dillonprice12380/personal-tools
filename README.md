@@ -18,7 +18,7 @@ sharing: the first account you create is the only account it will ever have.
 | **Budget** | Accounts, transactions, envelope budgets, recurring bills, CSV import with duplicate detection, transfers, savings goals, cashflow reports | YNAB, Monarch |
 | **Business** | Clients, deal pipeline, invoices with payments, bill-tracked-time-to-invoice, KPI tracking, notes | Bonsai, Harvest |
 | **Dashboard** | One cross-module view: net worth, revenue, workload, queue health, search visibility, and a single "needs attention" list drawn from every module | Geckoboard |
-| **Video** | Renders narrated explainer videos from a JSON spec — burnt-in captions, `.srt`/`.vtt` sidecars, frame-exact audio sync, and a verification pass over the finished file | Descript, Camtasia |
+| **Video** | Renders narrated explainer videos from a JSON spec — burnt-in captions, `.srt`/`.vtt` sidecars, frame-exact audio sync, and a verification pass over the finished file. Finished renders attach to a post from the social composer | Descript, Camtasia |
 
 The modules share one SQLite database, which is the point: tracked time becomes
 an invoice line, an invoice payment becomes a bank transaction, and an overdue
@@ -118,6 +118,12 @@ narration files, the audio track is built to the frame count sample by sample,
 and the finished file is decoded and checked against the spec before the render
 reports success — a mismatch is an error, not a warning. Text that will not fit
 its box stops the render rather than being clipped.
+
+**Social → Videos** does the same from the UI: upload the narration, describe the
+scenes, check the timeline and preview a frame before committing to a render, then
+attach the result to a post from the composer. Renders are served on an
+unguessable URL without a session, because Instagram and TikTok fetch attached
+media themselves — set `HELM_PUBLIC_URL` so that URL resolves from outside.
 
 **[docs/VIDEO.md](docs/VIDEO.md)** is the spec reference.
 

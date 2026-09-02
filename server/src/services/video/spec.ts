@@ -6,8 +6,8 @@
  * is going to come out wrong should fail in the first second, not after five
  * minutes of encoding.
  */
-import { existsSync, readFileSync, statSync } from 'node:fs';
-import { dirname, isAbsolute, resolve } from 'node:path';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import {
   type AudioOptions,
   type Background,
@@ -93,8 +93,42 @@ function color(value: unknown, path: string, problems: Problems, fallback: strin
   return value;
 }
 
-function existingFile(value: string, path: string, baseDir: string, problems: Problems): string {
+/**
+ * True when `full` is inside `root`. Both sides are resolved through symlinks
+ * where they exist, so a link planted inside the root cannot point out of it.
+ */
+function isInside(full: string, root: string): boolean {
+  const real = (p: string) => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return resolve(p);
+    }
+  };
+  const rel = relative(real(root), real(full));
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
+/**
+ * Resolve a path from the spec and check it exists.
+ *
+ * `allowedRoot` confines it. A spec written by hand and run through the CLI is
+ * trusted with the whole filesystem — you are running it yourself. A spec that
+ * arrived over HTTP is not: without this, `"background": {"type": "image",
+ * "path": "../../.env"}` would embed that file into a video as a data URI.
+ */
+function existingFile(
+  value: string,
+  path: string,
+  baseDir: string,
+  problems: Problems,
+  allowedRoot?: string,
+): string {
   const full = isAbsolute(value) ? value : resolve(baseDir, value);
+  if (allowedRoot && !isInside(full, allowedRoot)) {
+    problems.add(path, `must be inside ${allowedRoot} — ${full} is outside it`);
+    return full;
+  }
   if (!existsSync(full)) {
     problems.add(path, `file not found: ${full}`);
   } else if (!statSync(full).isFile()) {
@@ -109,6 +143,7 @@ function background(
   baseDir: string,
   problems: Problems,
   fallback: Background,
+  allowedRoot?: string,
 ): Background {
   if (value === undefined) return fallback;
   if (typeof value !== 'object' || value === null) {
@@ -128,7 +163,7 @@ function background(
     case 'image':
       return {
         type: 'image',
-        path: existingFile(String(value.path ?? ''), `${path}.path`, baseDir, problems),
+        path: existingFile(String(value.path ?? ''), `${path}.path`, baseDir, problems, allowedRoot),
         fit: value.fit === 'contain' ? 'contain' : 'cover',
         dim: num(value.dim, `${path}.dim`, problems, { fallback: 0.35, min: 0, max: 1 }),
         kenBurns: num(value.kenBurns, `${path}.kenBurns`, problems, { fallback: 0, min: 0, max: 0.5 }),
@@ -179,7 +214,21 @@ export function loadSpecFile(specPath: string): VideoSpec {
   return normaliseSpec(raw as VideoSpecInput, dirname(full));
 }
 
-export function normaliseSpec(input: VideoSpecInput, baseDir: string): VideoSpec {
+export interface NormaliseOptions {
+  /**
+   * Confine every path in the spec to this directory. Set it whenever the spec
+   * did not come from someone with shell access to the machine.
+   */
+  allowedRoot?: string;
+  /** Use this output path and ignore the spec's own `output`. */
+  forceOutput?: string;
+}
+
+export function normaliseSpec(
+  input: VideoSpecInput,
+  baseDir: string,
+  options: NormaliseOptions = {},
+): VideoSpec {
   const problems = new Problems();
   if (typeof input !== 'object' || input === null) {
     throw new VideoSpecError('The spec must be a JSON object.');
@@ -218,13 +267,21 @@ export function normaliseSpec(input: VideoSpecInput, baseDir: string): VideoSpec
 
   let fontFile = '';
   let boldFontFile = '';
+  if (options.allowedRoot && themeInput.fontFile) {
+    // A confined spec may not name its own font; the system font is used.
+    problems.add('theme.fontFile', 'cannot be set on a spec rendered from the API');
+  }
   try {
-    fontFile = resolveFontFile(themeInput.fontFile, baseDir, 'regular');
+    fontFile = resolveFontFile(options.allowedRoot ? undefined : themeInput.fontFile, baseDir, 'regular');
   } catch (err) {
     problems.add('theme.fontFile', (err as Error).message);
   }
   try {
-    boldFontFile = resolveFontFile(themeInput.boldFontFile ?? themeInput.fontFile, baseDir, 'bold');
+    boldFontFile = resolveFontFile(
+      options.allowedRoot ? undefined : themeInput.boldFontFile ?? themeInput.fontFile,
+      baseDir,
+      'bold',
+    );
   } catch {
     // A bold face is a nicety; fall back to the regular one rather than failing.
     boldFontFile = fontFile;
@@ -244,7 +301,7 @@ export function normaliseSpec(input: VideoSpecInput, baseDir: string): VideoSpec
   });
 
   const theme: Theme = {
-    background: background(themeInput.background, 'theme.background', baseDir, problems, defaultBackground),
+    background: background(themeInput.background, 'theme.background', baseDir, problems, defaultBackground, options.allowedRoot),
     fontFile,
     boldFontFile: boldFontFile || fontFile,
     titleColor: color(themeInput.titleColor, 'theme.titleColor', problems, '#ffffff'),
@@ -287,7 +344,7 @@ export function normaliseSpec(input: VideoSpecInput, baseDir: string): VideoSpec
   if (input.audio?.music) {
     const musicPath = typeof input.audio.music === 'string' ? input.audio.music : input.audio.music.path;
     audio.music = {
-      path: existingFile(String(musicPath ?? ''), 'audio.music.path', baseDir, problems),
+      path: existingFile(String(musicPath ?? ''), 'audio.music.path', baseDir, problems, options.allowedRoot),
       gainDb: num(
         typeof input.audio.music === 'string' ? undefined : input.audio.music.gainDb,
         'audio.music.gainDb', problems, { fallback: -22, min: -60, max: 12 },
@@ -316,7 +373,7 @@ export function normaliseSpec(input: VideoSpecInput, baseDir: string): VideoSpec
     const narrationInput = typeof scene.narration === 'string' ? { path: scene.narration } : scene.narration;
     const narration = narrationInput
       ? {
-          path: existingFile(String(narrationInput.path ?? ''), `${path}.narration.path`, baseDir, problems),
+          path: existingFile(String(narrationInput.path ?? ''), `${path}.narration.path`, baseDir, problems, options.allowedRoot),
           text: typeof narrationInput.text === 'string' ? narrationInput.text : '',
           gainDb: num(narrationInput.gainDb, `${path}.narration.gainDb`, problems, {
             fallback: 0, min: -60, max: 12,
@@ -338,7 +395,7 @@ export function normaliseSpec(input: VideoSpecInput, baseDir: string): VideoSpec
     const imageInput = typeof scene.image === 'string' ? { path: scene.image } : scene.image;
     const image = imageInput
       ? {
-          path: existingFile(String(imageInput.path ?? ''), `${path}.image.path`, baseDir, problems),
+          path: existingFile(String(imageInput.path ?? ''), `${path}.image.path`, baseDir, problems, options.allowedRoot),
           fit: imageInput.fit === 'cover' ? ('cover' as const) : ('contain' as const),
           maxHeight: num(imageInput.maxHeight, `${path}.image.maxHeight`, problems, {
             fallback: 0.55, min: 0.05, max: 1,
@@ -365,7 +422,7 @@ export function normaliseSpec(input: VideoSpecInput, baseDir: string): VideoSpec
 
     let cues = captionCues(scene.captions, `${path}.captions`, problems);
     if (!cues && scene.captionsFrom) {
-      const srtPath = existingFile(String(scene.captionsFrom), `${path}.captionsFrom`, baseDir, problems);
+      const srtPath = existingFile(String(scene.captionsFrom), `${path}.captionsFrom`, baseDir, problems, options.allowedRoot);
       if (existsSync(srtPath)) {
         try {
           cues = parseSrt(readFileSync(srtPath, 'utf8'));
@@ -386,14 +443,16 @@ export function normaliseSpec(input: VideoSpecInput, baseDir: string): VideoSpec
       body: typeof scene.body === 'string' && scene.body.trim() ? scene.body.trim() : null,
       bullets,
       image,
-      background: background(scene.background, `${path}.background`, baseDir, problems, theme.background),
+      background: background(scene.background, `${path}.background`, baseDir, problems, theme.background, options.allowedRoot),
       captions: cues,
     };
   });
 
-  const output = input.output
-    ? isAbsolute(input.output) ? input.output : resolve(baseDir, input.output)
-    : resolve(baseDir, 'video.mp4');
+  const output = options.forceOutput
+    ? options.forceOutput
+    : input.output
+      ? isAbsolute(input.output) ? input.output : resolve(baseDir, input.output)
+      : resolve(baseDir, 'video.mp4');
 
   problems.throwIfAny();
 
