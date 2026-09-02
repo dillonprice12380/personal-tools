@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { normaliseSpec, parseSrt, PRESETS } from '../src/services/video/spec.js';
@@ -119,4 +119,110 @@ test('srt round-trips through parse and serialise', () => {
 
 test('a malformed srt is reported rather than silently dropped', () => {
   assert.throws(() => parseSrt('1\nthis is not a timing line\nsome text\n'), /no timing line/);
+});
+
+/* ------------------------------------------------------------------ */
+/* Path confinement — the boundary that makes a spec safe over HTTP    */
+/* ------------------------------------------------------------------ */
+
+test('allowedRoot permits a file inside the root', () => {
+  const inside = join(workDir, 'inside.wav');
+  writeFileSync(inside, '');
+  const spec = normaliseSpec(
+    { scenes: [{ narration: 'inside.wav', title: 'ok' }] },
+    workDir,
+    { allowedRoot: workDir },
+  );
+  assert.equal(spec.scenes[0].narration?.path, inside);
+});
+
+test('allowedRoot refuses a relative path that climbs out of the root', () => {
+  const nested = join(workDir, 'nested');
+  mkdirSync(nested, { recursive: true });
+  const message = (() => {
+    try {
+      normaliseSpec(
+        { scenes: [{ narration: '../narration.wav', title: 'x' }] },
+        nested,
+        { allowedRoot: nested },
+      );
+    } catch (err) {
+      return (err as Error).message;
+    }
+    throw new assert.AssertionError({ message: 'the escaping path was accepted' });
+  })();
+  assert.match(message, /must be inside/);
+});
+
+test('allowedRoot refuses an absolute path outside the root', () => {
+  for (const attack of ['/etc/passwd', '/etc/hostname']) {
+    const message = (() => {
+      try {
+        normaliseSpec(
+          { scenes: [{ duration: 2, title: 'x', background: { type: 'image', path: attack } }] },
+          workDir,
+          { allowedRoot: workDir },
+        );
+      } catch (err) {
+        return (err as Error).message;
+      }
+      throw new assert.AssertionError({ message: `${attack} was accepted` });
+    })();
+    assert.match(message, /must be inside/);
+  }
+});
+
+test('allowedRoot refuses a symlink inside the root that points outside it', () => {
+  const target = join(workDir, '..', `escape-${Date.now()}.wav`);
+  writeFileSync(target, '');
+  const link = join(workDir, 'looks-innocent.wav');
+  try {
+    symlinkSync(target, link);
+  } catch {
+    return; // Some filesystems disallow symlinks; the other cases still cover it.
+  }
+  const message = (() => {
+    try {
+      normaliseSpec({ scenes: [{ narration: 'looks-innocent.wav', title: 'x' }] }, workDir, {
+        allowedRoot: workDir,
+      });
+    } catch (err) {
+      return (err as Error).message;
+    }
+    throw new assert.AssertionError({ message: 'the symlink out of the root was accepted' });
+  })();
+  assert.match(message, /must be inside/);
+});
+
+test('a confined spec may not choose its own font file', () => {
+  const message = (() => {
+    try {
+      normaliseSpec(
+        { theme: { fontFile: '/etc/passwd' }, scenes: [{ duration: 2, title: 'x' }] },
+        workDir,
+        { allowedRoot: workDir },
+      );
+    } catch (err) {
+      return (err as Error).message;
+    }
+    throw new assert.AssertionError({ message: 'the font override was accepted' });
+  })();
+  assert.match(message, /theme\.fontFile: cannot be set/);
+});
+
+test('forceOutput wins over the output named in the spec', () => {
+  const forced = join(workDir, 'forced.mp4');
+  const spec = normaliseSpec(
+    { output: '/tmp/somewhere-else.mp4', scenes: [{ duration: 1, title: 'x' }] },
+    workDir,
+    { allowedRoot: workDir, forceOutput: forced },
+  );
+  assert.equal(spec.output, forced);
+});
+
+test('without allowedRoot the CLI keeps its run-it-yourself freedom', () => {
+  const outside = join(workDir, '..', `cli-${Date.now()}.wav`);
+  writeFileSync(outside, '');
+  const spec = normaliseSpec({ scenes: [{ narration: outside, title: 'x' }] }, workDir);
+  assert.equal(spec.scenes[0].narration?.path, outside);
 });

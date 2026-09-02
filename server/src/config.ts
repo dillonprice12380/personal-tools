@@ -61,10 +61,24 @@ const root = process.env.HELM_DATA_DIR
   : path.resolve(process.cwd(), '../data');
 
 fs.mkdirSync(root, { recursive: true });
+fs.mkdirSync(path.join(root, 'video', 'assets'), { recursive: true });
+fs.mkdirSync(path.join(root, 'video', 'renders'), { recursive: true });
 
 export const config = {
   dataDir: root,
   dbPath: process.env.HELM_DB_PATH || path.join(root, 'helm.db'),
+  /** Narration audio and images uploaded for videos. */
+  videoAssetsDir: path.join(root, 'video', 'assets'),
+  /** Finished renders, served under /media/video/. */
+  videoRendersDir: path.join(root, 'video', 'renders'),
+  /**
+   * Absolute base URL Helm is reachable at from the outside, e.g.
+   * https://helm.example.ts.net. Instagram and TikTok fetch media themselves,
+   * so a render can only be posted to them if its URL resolves on the public
+   * internet. Left empty, attached media URLs are built from the request's own
+   * origin, which is fine for the networks that accept an upload or a link.
+   */
+  publicUrl: (process.env.HELM_PUBLIC_URL || '').replace(/\/+$/, ''),
   port: Number(process.env.PORT || 4000),
   /**
    * Bind address. Defaults to loopback so Helm is not exposed to the local
