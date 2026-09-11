@@ -19,6 +19,7 @@ sharing: the first account you create is the only account it will ever have.
 | **Business** | Clients, deal pipeline, invoices with payments, bill-tracked-time-to-invoice, KPI tracking, notes | Bonsai, Harvest |
 | **Dashboard** | One cross-module view: net worth, revenue, workload, queue health, search visibility, and a single "needs attention" list drawn from every module | Geckoboard |
 | **Video** | Renders narrated explainer videos from a JSON spec — burnt-in captions, `.srt`/`.vtt` sidecars, frame-exact audio sync, and a verification pass over the finished file. Finished renders attach to a post from the social composer | Descript, Camtasia |
+| **Skills** | A local skills database (O*NET importable), self-assessment, gap analysis ranked by importance, and a study plan that schedules itself and pushes into Tasks. Course recommendations carry your Udemy affiliate link | LinkedIn Skills, Degreed |
 
 The modules share one SQLite database, which is the point: tracked time becomes
 an invoice line, an invoice payment becomes a bank transaction, and an overdue
@@ -126,6 +127,46 @@ unguessable URL without a session, because Instagram and TikTok fetch attached
 media themselves — set `HELM_PUBLIC_URL` so that URL resolves from outside.
 
 **[docs/VIDEO.md](docs/VIDEO.md)** is the spec reference.
+
+## Skills, gaps and study plans
+
+**Skills** keeps a local database of what roles require and what you can
+actually do, and subtracts one from the other. No model call is involved: a gap
+report is one SQL join and a sort, so it runs offline, costs nothing, and gives
+the same answer twice.
+
+```
+gap      = max(0, required_level - current_level)
+priority = gap x (importance / 100)
+```
+
+Load Helm's starter taxonomy in one click, or import the real
+[O*NET database](https://www.onetcenter.org/database.html) — roughly a thousand
+occupations with published importance and level ratings:
+
+```bash
+npm run skills:import -- --dir ./db_30_0_text
+```
+
+From a gap report, **Plan** lays the highest-priority gaps across a calendar
+against the hours you actually have, and pushes each step into Tasks with due
+dates and estimates already set — a learning plan is work, and it belongs where
+the rest of the week's work is.
+
+Each skill carries courses. The simplest path needs no API at all: **Manage**
+gives every skill a field — paste a link, save, and that is what the analyser
+shows. You can also import a list or pull straight from an Impact product
+catalogue. Helm stores the plain course URL
+and builds your tracked link at click time, so switching affiliate network
+re-points every course at once.
+
+Connect the Impact API and it closes the loop: every outbound link is stamped
+with a per-course sub id, conversions are pulled back, and earnings are
+reported **per skill** — approved, pending and reversed kept apart, because a
+pending conversion is not money yet.
+
+**[docs/SKILLS.md](docs/SKILLS.md)** covers the import, the scoring and the
+affiliate setup.
 
 ## How this compares to Semrush and Moz
 

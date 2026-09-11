@@ -8,6 +8,7 @@ import { SocialPage } from './pages/Social';
 import { SeoPage } from './pages/Seo';
 import { BudgetPage } from './pages/Budget';
 import { BusinessPage } from './pages/Business';
+import { SkillsPage } from './pages/Skills';
 import { SettingsPage } from './pages/Settings';
 
 type User = { id: number; email: string; name: string };
@@ -28,6 +29,7 @@ const NAV = [
     items: [
       { to: '/budget', label: 'Budget', icon: '▤' },
       { to: '/business', label: 'Business', icon: '◫' },
+      { to: '/skills', label: 'Skills', icon: '◐' },
     ],
   },
 ];
@@ -96,6 +98,7 @@ export function App() {
           <Route path="/seo" element={<SeoPage />} />
           <Route path="/budget" element={<BudgetPage />} />
           <Route path="/business" element={<BusinessPage />} />
+          <Route path="/skills" element={<SkillsPage />} />
           <Route path="/settings" element={<SettingsPage user={user} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

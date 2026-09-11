@@ -1,0 +1,416 @@
+# Skills: gap analysis and planning
+
+The Skills module answers one question — *what am I missing for the work I want
+to be doing, and what should I study first* — and answers it by subtraction over
+a local database rather than by asking a language model.
+
+That matters for cost and for reproducibility. A gap report is one SQL join and
+a sort. It runs on every page load, offline, for free, and it gives the same
+answer twice.
+
+## How it works
+
+Three tables carry the weight:
+
+| Table | What it holds |
+|---|---|
+| `skills` | The taxonomy — one row per skill, with a stable `code` |
+| `occupations` | Target roles |
+| `occupation_skills` | The matrix: for each (role, skill), an **importance** and a **required level**, both 0-100 |
+
+Your own side is `skill_assessments` — one dated row per rating, never an
+overwrite, so progress is a query instead of a memory.
+
+The analysis is then arithmetic:
+
+```
+gap      = max(0, required_level - current_level)
+priority = gap × (importance / 100)
+```
+
+and the ranking is `priority` descending. Weighting by importance is the whole
+point: a 40-point hole in something the role barely touches should not outrank a
+20-point hole in the thing it is built on.
+
+Overall **readiness** is importance-weighted coverage:
+
+```
+readiness = 100 × Σ(importance × min(current, required))
+                / Σ(importance × required)
+```
+
+Capping the numerator at `required` is deliberate. Being an expert in something
+the role wants at "competent" is not spare credit that offsets a hole elsewhere.
+With no requirements loaded, readiness is `null` rather than `0` — "no profile"
+and "0% ready" are different claims and the UI should not conflate them.
+
+### Proficiency scale
+
+Six rungs, not a free slider — a self-assessment is a judgement, and rendering it
+to single percentage points would dress it up as a measurement.
+
+| Value | Label | Meaning |
+|---|---|---|
+| 0 | None | Never used it |
+| 20 | Novice | Followed a tutorial |
+| 40 | Advanced beginner | Works with help |
+| 60 | Competent | Works unsupervised |
+| 80 | Proficient | Handles the awkward cases |
+| 100 | Expert | Others ask you |
+
+## Getting a skills database
+
+### Option 1 — the starter taxonomy (instant, offline)
+
+**Skills → Load starter taxonomy**, or `POST /api/skills-seed`.
+
+43 skills and 6 roles aimed at someone running a small operation alone:
+freelance web developer, digital marketing consultant, content creator, data
+analyst, solo SaaS founder, small agency owner.
+
+These numbers are **Helm's own curation, not survey data**. They are rows in
+`occupations`/`occupation_skills` tagged `source = 'starter'`, meant as a
+starting point you edit. For citable ratings, import the real thing.
+
+### Option 2 — O*NET (authoritative, ~1,000 occupations)
+
+[O*NET](https://www.onetcenter.org/database.html) is the US Department of
+Labor's occupational database. It rates every occupation against the same skill,
+knowledge and ability elements with published numeric importance and level
+values — exactly the matrix this module needs.
+
+```bash
+# download and unzip the tab-delimited "text" bundle first
+npm run skills:import -- --dir ./db_30_0_text
+```
+
+Options:
+
+```bash
+--only 15-1252.00,13-1161.00   # import just these occupations
+--no-technology                # skip Technology Skills.txt
+```
+
+Files read (all optional — import what you have): `Occupation Data.txt`,
+`Skills.txt`, `Knowledge.txt`, `Abilities.txt`, `Technology Skills.txt`.
+
+Notes on the import:
+
+- **Scales are normalised on the way in.** O*NET publishes importance 1-5 and
+  level 0-7; both become 0-100 so nothing downstream needs to know the source.
+- **Columns are matched by header name, not position.** The column set has
+  shifted between releases, and a silent off-by-one would poison every number.
+- **Suppressed rows are dropped.** O*NET flags `Recommend Suppress` and
+  `Not Relevant` when an estimate is too thin to publish; importing them anyway
+  would put invented precision into a gap report.
+- **Technology Skills carries no ratings**, so those rows get flat defaults
+  (hot technologies rate slightly higher) rather than fabricated numbers.
+- The full bundle is around a thousand roles and 100k+ requirement rows. It
+  imports fine, but `--only` keeps the role picker usable.
+
+> **Attribution.** O*NET data is published under
+> [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Helm does not
+> redistribute it — you download it yourself. If you put it in front of anyone
+> else, credit O*NET. Importing upserts by code, so O*NET rows take precedence
+> over starter rows describing the same element.
+
+### Option 3 — your own
+
+Add skills and roles by hand in the UI, or `PUT
+/api/occupations/:id/requirements` with an `items` array. A hand-added row gets
+`source = 'custom'` and a generated code.
+
+## The planner
+
+**Skills → Plan → Generate from current gaps** takes the ranked gaps and lays
+them across a calendar against the hours you say you actually have.
+
+Study time is estimated as:
+
+```
+minutes = gap × minutesPerPoint × (0.75 + importance/100 × 0.5)
+```
+
+rounded to the half hour. **This is a planning constant, not a measurement.** It
+exists so a plan can schedule itself, and `minutesPerPoint` is a setting
+(default 30 — one rung of the ladder ≈ 10 hours) precisely because the honest
+answer is "it depends". Tune it in `PATCH /api/skills-planning-settings`.
+
+Plans keep a snapshot of the readiness they were generated from, so later
+re-assessments show movement instead of quietly rewriting history.
+
+**Push to Tasks** creates a project and one task per step, with the due dates and
+estimates already set. This is why the module lives inside Helm rather than
+beside it: a learning plan is work, and it belongs where the rest of the week's
+work is — with a timer on it and the same "past due" alert.
+
+Marking a step done also records a new self-assessment at its target level, so
+the next gap report reflects it rather than still showing the gap you just
+closed.
+
+## Courses and affiliate links
+
+Each skill can carry learning resources. Two ways to fill the catalogue:
+
+### Paste a URL (always works)
+
+**Courses → Add by URL.** Helm validates the host, strips any tracking or coupon
+params that rode along with the copied link, and stores the course. No
+credentials needed. Without the API there is no metadata to fetch, so the title
+stays editable rather than being invented.
+
+### One link per skill (the simplest path — no API at all)
+
+**Skills → Manage → Skills & links.** Every skill has a field: paste a link,
+press Save. That link is what the gap report shows in its *Learn it* column and
+what a generated plan picks up.
+
+Any `http(s)` URL is accepted — a Udemy course, a book, a docs site, another
+network's link. The saved reference is pinned, so it wins over anything else
+catalogued for that skill, and re-saving the same URL updates the row rather
+than accumulating duplicates. Saving an empty field clears it.
+
+**Already-tracked links are detected and passed through untouched.** This
+matters: Helm normally stores the plain destination and builds your affiliate
+link at click time, so wrapping a link that *already* carries tracking would
+point one redirector at another — which breaks attribution rather than doubling
+it. Two signals catch it: a known redirector host (`click.linksynergy.com`,
+Impact's per-advertiser domains, Partnerize, ShareASale, Awin, CJ's rotating
+domains) and the shape they all share, a query parameter whose value is itself
+a URL. The row shows which mode it is in, with a *test it* link beside it.
+
+So both workflows are supported, and the UI tells you which one a given link
+got:
+
+| What you paste | What happens on click |
+|---|---|
+| `udemy.com/course/slug/` | Helm wraps it with your network link and sub id |
+| A tracking link from your Impact dashboard | Sent on exactly as pasted |
+
+#### Saving warns, it never refuses
+
+A wrong affiliate link fails quietly: it saves, looks right, sits in the
+analyser for weeks and earns nothing. So a save is checked and anything odd is
+reported — but the link is always stored, because a book or a docs page is a
+perfectly good reference and Helm is in no position to adjudicate.
+
+Ordered by how much each actually tells you:
+
+| Check | Severity | Example |
+|---|---|---|
+| A disguised destination (`user@host`) | ⚠ warning | `https://www.udemy.com@evil.example/…` |
+| A host nobody else can reach | ⚠ warning | `localhost`, `192.168.1.50` |
+| A punycode / homograph host | ⚠ warning | `udеmy.com` with a Cyrillic *е* |
+| One or two characters off a known platform | ⚠ warning | `udmey.com` → "Did you mean Udemy?" |
+| A host *containing* a platform name but not it | ⚠ warning | `udemy.com.login-verify.example` |
+| A Udemy link that is not a `/course/` page | info | `udemy.com/user/someone/` |
+| An unrecognised host | info | `example.com/books/…` — fine for a book |
+
+The typo and lookalike checks are the ones worth having. "I don't recognise this
+host" is weak, since most of the web is not a course platform; "this is one
+character from a host I *do* recognise" almost always means a mistake. A
+homograph is only detectable because the URL parser normalises it to punycode
+first — to a reader it renders as the real domain.
+
+The first four end the check, so an unreachable host is not also told it is an
+unrecognised platform.
+
+Pasted lists are checked the same way, and warning-level findings are listed
+after the import.
+
+Override the detection by passing `pre_tracked` explicitly to
+`PUT /api/skills/:id/reference` if it ever guesses wrong.
+
+### Role requirements
+
+**Skills → Manage → Role requirements** edits the matrix behind the analyser:
+which skills a role needs, how much it leans on each (`importance`) and the
+proficiency it calls for (`required_level`), both 0-100. Since the report ranks
+by `gap × importance`, importance is what decides the order you learn things in.
+
+Adding a skill to a role starts it at 50/50 — adjust, then save. Saving replaces
+the role's matrix in one transaction.
+
+### Paste a list (the fast way to fill a catalogue)
+
+**Courses → Paste a list.** One course per line; name the skill by code or by
+name, separated with a pipe or a tab. The URL can sit in any column.
+
+```
+# lines starting with a hash are ignored
+https://www.udemy.com/course/slug/
+starter:seo | https://www.udemy.com/course/slug/
+SEO | https://www.udemy.com/course/slug/ | The SEO Bootcamp
+```
+
+Commas are deliberately *not* separators — a course title is far likelier to
+contain one ("Python, Django and Flask") than a pipe is. Re-running the same
+paste updates the existing rows rather than duplicating them, and lines that
+name an unknown skill or a non-Udemy host are reported back rather than
+silently dropped.
+
+**Courses → Check links** then fetches each catalogued URL from *your* server
+and flags the ones that no longer resolve. Course pages get retired, and a dead
+affiliate link earns nothing while costing the reader's trust. The check hits
+the plain course URL, never the tracked one, so it never registers a click.
+
+### The Udemy Affiliate API (optional)
+
+**Skills → Affiliate → Udemy API → Connect.** Paste the Client ID and Client
+Secret; they are encrypted at rest with the rest of the vault and the API never
+returns them. Saving again replaces the stored pair.
+
+Getting the credentials is a separate matter from having them: Udemy issues
+them to **approved** affiliates on request, through your Udemy account's API
+clients page, and approval is not automatic. Nothing else in the module depends
+on them.
+
+**Courses → Search Udemy** then searches the catalogue for a skill and stores
+what it finds. The search term defaults to the skill's name plus its
+`search_terms`, because an O*NET element name alone ("Systems Analysis") is too
+abstract to return a useful course list.
+
+> The Affiliate API is only open to **approved** Udemy affiliates. Without
+> approval it answers 401/403, which Helm surfaces as a plain message rather than
+> an error — the paste-a-URL path still works, and so does every link built
+> below. Nothing else in the module depends on it: plan generation never calls
+> out to Udemy.
+
+### How links are built
+
+Helm stores the **plain course URL** and builds your tracked link at click time.
+Changing network therefore re-points every catalogued course at once, with no
+migration and no stale links.
+
+| Network | What to configure |
+|---|---|
+| `impact` | The deep-link base from your Impact dashboard. Helm appends `?u=<course URL>`. |
+| `linksynergy` | Publisher ID and merchant ID (`mid`). Udemy's is commonly `39197` — confirm it in your own dashboard. |
+| `custom` | A template using `{url}` or `{encoded_url}`. |
+| `direct` | The plain URL plus whatever `extraParams` you set. |
+| `none` | Undecorated. |
+
+Udemy administers its affiliate programme through a network, and the exact
+deep-link shape is whatever your dashboard issues — so Helm stores that base
+rather than hardcoding one vendor's format and breaking when it changes.
+
+#### Setting up Impact: copy one link, not one per course
+
+You do **not** need a tracking link per course. Impact deep-links with a `u`
+parameter carrying the destination, so a single base covers the whole
+catalogue:
+
+```
+https://imp.xxxxxxx.net/c/<account>/<ad>/<campaign>?u=https%3A%2F%2Fwww.udemy.com%2Fcourse%2Fslug%2F
+```
+
+1. In the Impact marketplace, open the Udemy program and **copy the tracking
+   link once**.
+2. Paste it into **Skills → Affiliate → Deep-link base**, with network set to
+   `impact`.
+3. The tab renders a live sample link. Click it once and confirm the click
+   registers in Impact before trusting it.
+
+Every course in the catalogue — including ones added later — is then tracked,
+and switching network later re-points all of them at once.
+
+If your program issues a format that does not take `u`, use the `custom`
+network with a template containing `{encoded_url}`.
+
+Two deliberate behaviours:
+
+- **An incomplete configuration falls back to the plain link.** A tracking link
+  that 404s loses the click *and* the reader; an untracked one only loses the
+  commission. The Affiliate tab flags when a sample link comes out untracked.
+- **Only absolute `http(s)` URLs are ever emitted.** The redirect endpoint sends
+  a browser wherever the stored row points, so a `javascript:` URL that reached
+  the database through an import must not come back out as a `Location` header.
+
+### The Impact API: catalogues and actual earnings
+
+Impact issues every media partner an **Account SID** and **Auth Token** with no
+approval step, which makes this the more reachable of the two APIs — and the
+more useful one. Connect it at **Skills → Affiliate → Impact API → Connect**.
+
+It unlocks two things Udemy's affiliate API does not.
+
+**Product catalogues.** Where the advertiser publishes a feed, it already
+carries the titles, prices and URLs the course catalogue wants. Pick a skill on
+the **Courses** tab and press *Import from Impact*: the feed is searched for
+that skill's name and `search_terms`, and matching Udemy course URLs are stored
+like any other course — as the plain destination, decorated at click time.
+Listings that are not Udemy course URLs are reported rather than stored.
+
+**Conversions.** *Sync earnings* pulls your actions back and reports payouts
+**per skill**, which is the question worth asking: not "how many clicks" but
+"which gap in the analyser actually pays".
+
+Three deliberate choices in how earnings are reported:
+
+- **Approved, pending and reversed are kept apart.** A pending action is not
+  money yet and a reversed one is money taken back. Summing all three as
+  "revenue" would overstate what you have earned, so Helm never does.
+- **Unattributed conversions are still stored.** An action whose sub id Helm
+  does not recognise is real money — it just cannot be traced to a skill.
+  Dropping it would understate your total, so it counts toward the totals and
+  is excluded only from the per-skill breakdown, with the count shown.
+- **Re-syncing is idempotent.** Actions upsert on the network's own id, so
+  running a sync twice does not double your earnings.
+
+#### How a payout finds its skill
+
+Helm stamps `subId1=helm-<resourceId>` on every outbound Impact link (`u1` on
+LinkSynergy, `{sub_id}` in a custom template). Impact hands that tag back on the
+conversion, and Helm maps it to the course, then to the skill.
+
+That is the whole attribution chain:
+
+```
+gap report → course → tracked click (subId1=helm-42) → conversion → skill earnings
+```
+
+Turn the tagging off with the checkbox on the Affiliate tab if you would rather
+use sub ids for something else; links keep working, earnings just arrive
+unattributed.
+
+### Clicks
+
+Every outbound click goes through `/api/learning-resources/:id/go`, which logs
+it and then redirects. **Skills → Affiliate** reports clicks by course and by
+day.
+
+This is *your* record of what was clicked here, to reconcile against the
+network's own report — Helm cannot see conversions or commissions, because those
+happen on the network's side. A gap between the two is normal (cookie windows,
+blockers, purchases made later); a total absence of clicks in your dashboard
+when Helm logged plenty means your link configuration is wrong.
+
+> **Disclosure.** The `disclosure` setting is shown beside affiliate links in the
+> UI and defaults to a usable one. The FTC requires disclosure of affiliate
+> relationships, and so do Udemy's own affiliate terms. Keep it.
+
+## API
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/skills-gap?occupation_id=` | The gap report |
+| `GET /api/skills-profile?occupation_id=` | Every skill with its current level |
+| `POST /api/skill-assessments` | Record one or many ratings |
+| `GET /api/skills/:id/history` | Assessment history for one skill |
+| `POST /api/skills-seed` | Load the starter taxonomy (idempotent) |
+| `GET`/`PUT /api/occupations/:id/requirements` | Read/replace a role's matrix |
+| `POST /api/learning-plans/generate` | Build a plan from current gaps |
+| `PATCH /api/learning-plans/:id/items/:itemId` | Update a step |
+| `POST /api/learning-plans/:id/push-tasks` | Create tasks from the plan |
+| `POST /api/udemy/search` | Search the Udemy catalogue |
+| `POST /api/udemy/import` | Add a course by URL |
+| `PUT /api/skills/:id/reference` | Set (or clear) the one link for a skill |
+| `POST /api/learning-resources/bulk` | Import a pasted list of courses |
+| `POST /api/learning-resources/check` | Re-check catalogued URLs, flag dead ones |
+| `GET /api/learning-resources/:id/go` | Logged affiliate redirect |
+| `GET`/`PATCH /api/affiliate-settings` | Link configuration |
+| `GET /api/affiliate-report?days=` | Clicks, and earnings by skill once synced |
+| `GET /api/impact/catalogs` | Product catalogues the account can see |
+| `POST /api/impact/catalog-import` | Import courses from a catalogue into a skill |
+| `POST /api/impact/sync-actions` | Pull conversions back and attribute them |
+| `GET /api/skills-summary` | Dashboard roll-up |

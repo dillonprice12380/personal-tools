@@ -38,6 +38,8 @@ function reset() {
     'seo_rankings', 'seo_keywords', 'seo_pages', 'seo_crawls', 'seo_competitors',
     'content_briefs', 'seo_sites',
     'invoice_payments', 'invoice_items', 'invoices', 'deals', 'metric_values', 'metrics',
+    'affiliate_clicks', 'learning_plan_items', 'learning_plans', 'learning_resources',
+    'skill_assessments', 'occupation_skills', 'occupations', 'skills',
     'notes', 'time_entries', 'task_comments', 'task_tags', 'tags', 'tasks', 'task_lists',
     'projects', 'budgets', 'recurring_transactions', 'transactions', 'savings_goals',
     'categories', 'accounts', 'clients', 'activity',

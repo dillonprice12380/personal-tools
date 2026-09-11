@@ -21,7 +21,8 @@
     "typecheck": "npm run typecheck --workspace server && npm run typecheck --workspace web",
     "test": "npm run test --workspace server",
     "seed": "npm run seed --workspace server",
-    "video": "npm run video --workspace server --"
+    "video": "npm run video --workspace server --",
+    "skills:import": "npm run skills:import --workspace server --"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
