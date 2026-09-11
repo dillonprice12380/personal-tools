@@ -184,9 +184,14 @@ the plain course URL, never the tracked one, so it never registers a click.
 
 ### The Udemy Affiliate API (optional)
 
-Store credentials under **Settings → Credentials** with service `udemy` and
-fields `clientId` / `clientSecret`. They are encrypted at rest with the rest of
-the vault.
+**Skills → Affiliate → Udemy API → Connect.** Paste the Client ID and Client
+Secret; they are encrypted at rest with the rest of the vault and the API never
+returns them. Saving again replaces the stored pair.
+
+Getting the credentials is a separate matter from having them: Udemy issues
+them to **approved** affiliates on request, through your Udemy account's API
+clients page, and approval is not automatic. Nothing else in the module depends
+on them.
 
 **Courses → Search Udemy** then searches the catalogue for a skill and stores
 what it finds. The search term defaults to the skill's name plus its

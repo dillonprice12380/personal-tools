@@ -1027,6 +1027,7 @@ function AffiliateTab() {
   const report = useApi<any>('/affiliate-report?days=90');
   const [form, setForm] = useState<Record<string, string> | null>(null);
   const [saved, setSaved] = useState(false);
+  const [connectOpen, setConnectOpen] = useState(false);
 
   const current = form ?? (settings.data ? { ...settings.data } : null);
   if (!current) return <div className="muted">Loading…</div>;
@@ -1064,9 +1065,16 @@ function AffiliateTab() {
           <Stat
             label="Udemy API"
             value={settings.data?.udemy_api_configured ? 'Connected' : 'Not connected'}
-            sub="Add credentials under Settings → Credentials (service: udemy)"
+            sub={
+              settings.data?.udemy_api_configured
+                ? 'Course search is available'
+                : 'Optional — pasting course URLs works without it'
+            }
             small
           />
+          <button className="btn sm" onClick={() => setConnectOpen(true)}>
+            {settings.data?.udemy_api_configured ? 'Replace credentials' : 'Connect'}
+          </button>
         </Card>
       </div>
 
@@ -1139,6 +1147,16 @@ function AffiliateTab() {
         <button className="btn primary" onClick={save}>Save</button>
       </Card>
 
+      {connectOpen && (
+        <ConnectUdemyModal
+          onClose={() => setConnectOpen(false)}
+          onSaved={() => {
+            setConnectOpen(false);
+            void settings.reload();
+          }}
+        />
+      )}
+
       <Card title="Most clicked (90 days)">
         {(report.data?.by_resource ?? []).length ? (
           <div className="table-wrap">
@@ -1168,5 +1186,78 @@ function AffiliateTab() {
         )}
       </Card>
     </div>
+  );
+}
+
+/**
+ * Udemy Affiliate API credentials.
+ *
+ * Write-only, like every other credential in Helm: the plaintext is encrypted
+ * on the way in and the API never returns it, so this form always starts
+ * empty even when a credential is already stored.
+ */
+function ConnectUdemyModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await api.post('/settings/credentials', {
+        service: 'udemy',
+        label: 'Udemy Affiliate API',
+        data: { clientId: clientId.trim(), clientSecret: clientSecret.trim() },
+      });
+      onSaved();
+    } catch (err: any) {
+      setError(err?.message ?? 'Could not save the credentials');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      title="Connect the Udemy Affiliate API"
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn ghost" onClick={onClose}>Cancel</button>
+          <button
+            className="btn primary"
+            disabled={!clientId.trim() || !clientSecret.trim() || busy}
+            onClick={submit}
+          >
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <Banner tone="error">{error}</Banner>
+        <Banner>
+          Entirely optional. Without it you can still paste course URLs, import a list, and build
+          tracked links — only the <strong>Search Udemy</strong> button needs it. The Affiliate API
+          is granted to approved affiliates only, so it may be declined.
+        </Banner>
+        <Field label="Client ID">
+          <input value={clientId} onChange={(e) => setClientId(e.target.value)} autoComplete="off" />
+        </Field>
+        <Field label="Client Secret" hint="Encrypted at rest; never returned by the API">
+          <input
+            type="password"
+            value={clientSecret}
+            onChange={(e) => setClientSecret(e.target.value)}
+            autoComplete="new-password"
+          />
+        </Field>
+        <div className="small muted">
+          Saving replaces any Udemy credential already stored — the newest is the one used.
+        </div>
+      </div>
+    </Modal>
   );
 }
