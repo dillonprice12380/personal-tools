@@ -5,6 +5,7 @@ import {
   buildAffiliateUrl,
   buildSearchUrl,
   normaliseUdemyUrl,
+  parseBulkCourseLines,
   parseContentDuration,
   parseUdemyCourse,
   safeOutboundUrl,
@@ -172,4 +173,44 @@ test('the search URL asks only for the fields the catalogue stores', () => {
   assert.ok(url.searchParams.get('fields[course]')!.includes('avg_rating'));
   // Page size is clamped so a typo cannot ask Udemy for ten thousand courses.
   assert.equal(new URL(buildSearchUrl('sql', { pageSize: 9999 })).searchParams.get('page_size'), '50');
+});
+
+test('a pasted block accepts bare URLs, and pipes or tabs for the other fields', () => {
+  const lines = parseBulkCourseLines(`
+# a comment line is ignored
+
+https://www.udemy.com/course/plain/
+starter:seo | https://www.udemy.com/course/with-skill/
+starter:seo | https://www.udemy.com/course/with-title/ | The SEO Bootcamp
+SEO\thttps://www.udemy.com/course/tabbed/\tTabbed Course
+  `);
+
+  assert.equal(lines.length, 4);
+  assert.deepEqual(lines[0], { skillRef: '', url: 'https://www.udemy.com/course/plain/', title: '' });
+  assert.equal(lines[1].skillRef, 'starter:seo');
+  assert.equal(lines[2].title, 'The SEO Bootcamp');
+  assert.deepEqual(lines[3], {
+    skillRef: 'SEO',
+    url: 'https://www.udemy.com/course/tabbed/',
+    title: 'Tabbed Course',
+  });
+});
+
+test('the URL is found wherever it sits in the line', () => {
+  // So a paste out of a spreadsheet does not have to have its columns reordered.
+  const [line] = parseBulkCourseLines('https://www.udemy.com/course/x/ | starter:seo');
+  assert.equal(line.url, 'https://www.udemy.com/course/x/');
+  assert.equal(line.skillRef, '');
+  assert.equal(line.title, 'starter:seo', 'a field after the URL reads as the title');
+});
+
+test('a title containing a comma survives, because commas are not separators', () => {
+  const [line] = parseBulkCourseLines(
+    'starter:web-backend | https://www.udemy.com/course/x/ | Python, Django and Flask'
+  );
+  assert.equal(line.title, 'Python, Django and Flask');
+});
+
+test('lines with no URL in them are dropped rather than half-imported', () => {
+  assert.deepEqual(parseBulkCourseLines('starter:seo | just some notes\n\n   \n'), []);
 });

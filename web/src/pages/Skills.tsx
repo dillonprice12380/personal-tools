@@ -76,6 +76,7 @@ type Resource = {
   go_url: string;
   affiliate_network: string;
   clicks: number;
+  link_ok: boolean | null;
 };
 
 type PlanItem = {
@@ -671,6 +672,30 @@ function CoursesTab() {
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
   const [importOpen, setImportOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [checkNote, setCheckNote] = useState('');
+
+  const checkLinks = async () => {
+    setChecking(true);
+    setCheckNote('');
+    try {
+      const result = await api.post<{ checked: number; dead: number }>(
+        '/learning-resources/check',
+        skillId ? { skill_id: skillId } : {}
+      );
+      setCheckNote(
+        result.dead
+          ? `${result.dead} of ${result.checked} link(s) did not resolve.`
+          : `All ${result.checked} link(s) resolved.`
+      );
+      await resources.reload();
+    } catch (err: any) {
+      setCheckNote(err?.message ?? 'Check failed');
+    } finally {
+      setChecking(false);
+    }
+  };
 
   const runSearch = async () => {
     if (!skillId) return;
@@ -712,11 +737,18 @@ function CoursesTab() {
           <button className="btn" disabled={!skillId || searching} onClick={runSearch}>
             {searching ? 'Searching…' : 'Search Udemy'}
           </button>
-          <button className="btn primary" onClick={() => setImportOpen(true)}>
+          <button className="btn" disabled={!items.length || checking} onClick={checkLinks}>
+            {checking ? 'Checking…' : 'Check links'}
+          </button>
+          <button className="btn" onClick={() => setImportOpen(true)}>
             Add by URL
+          </button>
+          <button className="btn primary" onClick={() => setBulkOpen(true)}>
+            Paste a list
           </button>
         </div>
         {searchError && <Banner tone="error">{searchError}</Banner>}
+        {checkNote && <Banner tone={checkNote.includes('did not') ? 'error' : 'ok'}>{checkNote}</Banner>}
         {affiliate.data?.disclosure && (
           <div className="small muted">{affiliate.data.disclosure}</div>
         )}
@@ -742,6 +774,9 @@ function CoursesTab() {
                   <tr key={r.id}>
                     <td>
                       {r.title}
+                      {r.link_ok === false && (
+                        <Chip tone="critical">link dead</Chip>
+                      )}
                       {r.instructor && <div className="small muted">{r.instructor}</div>}
                     </td>
                     <td>
@@ -779,6 +814,18 @@ function CoursesTab() {
           />
         )}
       </Card>
+
+      {bulkOpen && (
+        <BulkImportModal
+          defaultSkillId={skillId}
+          onClose={() => setBulkOpen(false)}
+          onSaved={() => {
+            setBulkOpen(false);
+            void resources.reload();
+            void skills.reload();
+          }}
+        />
+      )}
 
       {importOpen && (
         <ImportCourseModal
@@ -858,6 +905,108 @@ function ImportCourseModal({
             ))}
           </select>
         </Field>
+      </div>
+    </Modal>
+  );
+}
+
+function BulkImportModal({
+  defaultSkillId,
+  onClose,
+  onSaved,
+}: {
+  defaultSkillId: number | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [text, setText] = useState('');
+  const [result, setResult] = useState<{ imported: number; skipped: number; errors: Array<{ line: string; reason: string }> } | null>(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const res = await api.post<any>('/learning-resources/bulk', {
+        text,
+        skill_id: defaultSkillId,
+      });
+      setResult(res);
+      if (!res.skipped) onSaved();
+    } catch (err: any) {
+      setError(err?.message ?? 'Import failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      title="Paste a list of courses"
+      wide
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn ghost" onClick={result ? onSaved : onClose}>
+            {result ? 'Done' : 'Cancel'}
+          </button>
+          <button className="btn primary" disabled={!text.trim() || busy} onClick={submit}>
+            {busy ? 'Importing…' : 'Import'}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <Banner tone="error">{error}</Banner>
+        <p className="small muted" style={{ margin: 0 }}>
+          One course per line. Name the skill by code or by name, separated with a pipe or a tab.
+          The URL can sit in any column. Lines starting with <code>#</code> are ignored.
+        </p>
+        <pre className="small muted" style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+{`https://www.udemy.com/course/slug/
+starter:seo | https://www.udemy.com/course/slug/
+SEO | https://www.udemy.com/course/slug/ | The SEO Bootcamp`}
+        </pre>
+        <Field
+          label="Courses"
+          hint={
+            defaultSkillId
+              ? 'Lines without a skill go to the skill selected behind this dialog.'
+              : 'Lines without a skill are left unassigned.'
+          }
+        >
+          <textarea
+            rows={12}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="https://www.udemy.com/course/..."
+            style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}
+          />
+        </Field>
+
+        {result && (
+          <>
+            <Banner tone={result.skipped ? 'error' : 'ok'}>
+              Imported {result.imported} course(s){result.skipped ? `, skipped ${result.skipped}` : ''}. Courses already in the catalogue were updated in place.
+            </Banner>
+            {result.errors.length > 0 && (
+              <div className="table-wrap">
+                <table className="data">
+                  <thead><tr><th>Line</th><th>Why</th></tr></thead>
+                  <tbody>
+                    {result.errors.map((e, i) => (
+                      <tr key={i}>
+                        <td className="truncate small">{e.line}</td>
+                        <td className="small neg">{e.reason}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </Modal>
   );

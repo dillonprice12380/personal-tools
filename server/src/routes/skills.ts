@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { config } from '../config.js';
 import { all, db, get, getSetting, logActivity, run, scalar, setSetting } from '../db.js';
 import { crud } from '../lib/crud.js';
 import { decryptJson } from '../lib/crypto.js';
@@ -17,6 +18,7 @@ import {
   AFFILIATE_DEFAULTS,
   buildAffiliateUrl,
   normaliseUdemyUrl,
+  parseBulkCourseLines,
   parseUdemyCourse,
   safeOutboundUrl,
   searchUdemy,
@@ -387,6 +389,146 @@ skillsRouter.get(
   })
 );
 
+/**
+ * Bulk-add courses from a pasted block.
+ *
+ * The realistic way a catalogue gets filled: you have a shortlist in a
+ * spreadsheet or a notes file, not one URL at a time in a modal. Lines name a
+ * skill by code or by name, so a paste can cover every skill in one go.
+ *
+ * Nothing here talks to Udemy. Without the API there is no metadata to fetch,
+ * so an untitled line falls back to the course slug and stays editable rather
+ * than having a title invented for it.
+ */
+skillsRouter.post(
+  '/learning-resources/bulk',
+  wrap((req, res) => {
+    const text = String(req.body?.text ?? '');
+    if (!text.trim()) throw badRequest('Nothing to import');
+    const defaultSkillId = toInt(req.body?.skill_id, 0) || null;
+
+    const lines = parseBulkCourseLines(text);
+    if (!lines.length) throw badRequest('No lines with a URL in them');
+
+    const imported: Array<{ url: string; skill: string | null; title: string }> = [];
+    const skipped: Array<{ line: string; reason: string }> = [];
+
+    db.transaction(() => {
+      for (const line of lines) {
+        const url = normaliseUdemyUrl(line.url);
+        if (!url) {
+          skipped.push({ line: line.url, reason: 'not a Udemy course URL' });
+          continue;
+        }
+        const slug = udemyCourseSlug(url);
+        if (!slug) {
+          skipped.push({ line: line.url, reason: 'no course slug in the URL' });
+          continue;
+        }
+
+        // A skill reference matches on code first, then on name - a paste is
+        // as likely to say "SEO" as "starter:seo".
+        let skillId = defaultSkillId;
+        if (line.skillRef) {
+          const found =
+            scalar<number>('SELECT id FROM skills WHERE code = ?', [line.skillRef], 0) ||
+            scalar<number>(
+              'SELECT id FROM skills WHERE lower(name) = lower(?) AND archived = 0',
+              [line.skillRef],
+              0
+            );
+          if (!found) {
+            skipped.push({ line: line.url, reason: `unknown skill "${line.skillRef}"` });
+            continue;
+          }
+          skillId = found;
+        }
+
+        const title = line.title || slug.replace(/-/g, ' ');
+        saveCourse(skillId, {
+          external_id: slug,
+          title,
+          url,
+          instructor: '',
+          headline: '',
+          image_url: '',
+          price_cents: 0,
+          currency: 'USD',
+          rating: 0,
+          reviews: 0,
+          students: 0,
+          duration_minutes: 0,
+          level: '',
+        });
+        imported.push({
+          url,
+          skill: skillId ? scalar<string>('SELECT name FROM skills WHERE id = ?', [skillId], '') : null,
+          title,
+        });
+      }
+    })();
+
+    logActivity('learning_resources', null, 'create', `bulk import: ${imported.length} course(s)`);
+    // "imported", not "added": a course already in the catalogue is updated in
+    // place, so a re-run of the same paste creates nothing new.
+    res.status(201).json({
+      imported: imported.length,
+      skipped: skipped.length,
+      items: imported,
+      errors: skipped,
+    });
+  })
+);
+
+/**
+ * Check that catalogued course URLs still resolve.
+ *
+ * A dead affiliate link earns nothing and costs the reader's trust, and course
+ * pages do get retired. This runs from your own server, against the plain
+ * course URL rather than the tracked one, so it never registers a click.
+ */
+skillsRouter.post(
+  '/learning-resources/check',
+  wrap(async (req, res) => {
+    const skillId = toInt(req.body?.skill_id, 0);
+    const rows = all<{ id: number; url: string; title: string }>(
+      `SELECT id, url, title FROM learning_resources
+        WHERE url != '' ${skillId ? 'AND skill_id = ?' : ''}
+        ORDER BY id LIMIT 200`,
+      skillId ? [skillId] : []
+    );
+
+    const results: Array<{ id: number; title: string; status: number; ok: boolean }> = [];
+    // Sequential and unhurried: this is a housekeeping job against someone
+    // else's site, not a crawl to be finished as fast as possible.
+    for (const row of rows) {
+      let status = 0;
+      try {
+        const response = await fetch(row.url, {
+          method: 'GET',
+          redirect: 'follow',
+          headers: { 'user-agent': config.userAgent, accept: 'text/html,*/*' },
+          signal: AbortSignal.timeout(12_000),
+        });
+        status = response.status;
+      } catch {
+        status = 0;
+      }
+      run(
+        `UPDATE learning_resources SET checked_at = datetime('now'), check_status = ? WHERE id = ?`,
+        [status, row.id]
+      );
+      results.push({ id: row.id, title: row.title, status, ok: status >= 200 && status < 400 });
+    }
+
+    res.json({
+      checked: results.length,
+      dead: results.filter((r) => !r.ok).length,
+      items: results,
+    });
+  })
+);
+
 skillsRouter.use(
   '/learning-resources',
   crud({
@@ -417,6 +559,7 @@ skillsRouter.use(
           [row.id],
           0
         ),
+        link_ok: row.checked_at ? row.check_status >= 200 && row.check_status < 400 : null,
       };
     },
   })

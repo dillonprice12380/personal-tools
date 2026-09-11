@@ -631,6 +631,10 @@ CREATE TABLE IF NOT EXISTS learning_resources (
   level        TEXT NOT NULL DEFAULT '',       -- beginner | intermediate | expert | all
   hidden       INTEGER NOT NULL DEFAULT 0,
   synced_at    TEXT,
+  -- Link health. A dead affiliate link earns nothing and costs trust, so the
+  -- catalogue records when each URL was last reached and what it answered.
+  checked_at   TEXT,
+  check_status INTEGER NOT NULL DEFAULT 0,
   created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_learning_resources_skill ON learning_resources(skill_id);

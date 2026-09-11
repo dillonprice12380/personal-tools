@@ -296,3 +296,51 @@ export async function searchUdemy(
     };
   }
 }
+
+// ------------------------------------------------------------- bulk entry ---
+
+export type BulkCourseLine = {
+  /** A skill code or skill name, when the line carries one. */
+  skillRef: string;
+  url: string;
+  title: string;
+};
+
+/**
+ * Parse a pasted block of courses.
+ *
+ * Accepts one course per line, in whichever shape the paste happens to have:
+ *
+ *   https://www.udemy.com/course/slug/
+ *   starter:seo | https://www.udemy.com/course/slug/
+ *   starter:seo | https://www.udemy.com/course/slug/ | The SEO Bootcamp
+ *   SEO<TAB>https://www.udemy.com/course/slug/
+ *
+ * Pipes and tabs are the separators. Commas are deliberately not, because a
+ * course title is far more likely to contain one than a pipe is, and splitting
+ * "Python, Django and Flask" into three fields would be worse than not
+ * supporting CSV at all.
+ */
+export function parseBulkCourseLines(text: string): BulkCourseLine[] {
+  const out: BulkCourseLine[] = [];
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+
+    const parts = line.split(/\s*[|\t]\s*/).filter((p) => p !== '');
+    // The URL is whichever field looks like one, so the column order in the
+    // paste does not have to be guessed at.
+    const urlIndex = parts.findIndex((p) => /^https?:\/\//i.test(p));
+    if (urlIndex === -1) continue;
+
+    const url = parts[urlIndex];
+    const before = parts.slice(0, urlIndex);
+    const after = parts.slice(urlIndex + 1);
+    out.push({
+      skillRef: before[0] ?? '',
+      url,
+      title: after[0] ?? '',
+    });
+  }
+  return out;
+}

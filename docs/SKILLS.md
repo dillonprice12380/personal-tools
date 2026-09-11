@@ -159,6 +159,29 @@ params that rode along with the copied link, and stores the course. No
 credentials needed. Without the API there is no metadata to fetch, so the title
 stays editable rather than being invented.
 
+### Paste a list (the fast way to fill a catalogue)
+
+**Courses → Paste a list.** One course per line; name the skill by code or by
+name, separated with a pipe or a tab. The URL can sit in any column.
+
+```
+# lines starting with a hash are ignored
+https://www.udemy.com/course/slug/
+starter:seo | https://www.udemy.com/course/slug/
+SEO | https://www.udemy.com/course/slug/ | The SEO Bootcamp
+```
+
+Commas are deliberately *not* separators — a course title is far likelier to
+contain one ("Python, Django and Flask") than a pipe is. Re-running the same
+paste updates the existing rows rather than duplicating them, and lines that
+name an unknown skill or a non-Udemy host are reported back rather than
+silently dropped.
+
+**Courses → Check links** then fetches each catalogued URL from *your* server
+and flags the ones that no longer resolve. Course pages get retired, and a dead
+affiliate link earns nothing while costing the reader's trust. The check hits
+the plain course URL, never the tracked one, so it never registers a click.
+
 ### The Udemy Affiliate API (optional)
 
 Store credentials under **Settings → Credentials** with service `udemy` and
@@ -193,6 +216,29 @@ migration and no stale links.
 Udemy administers its affiliate programme through a network, and the exact
 deep-link shape is whatever your dashboard issues — so Helm stores that base
 rather than hardcoding one vendor's format and breaking when it changes.
+
+#### Setting up Impact: copy one link, not one per course
+
+You do **not** need a tracking link per course. Impact deep-links with a `u`
+parameter carrying the destination, so a single base covers the whole
+catalogue:
+
+```
+https://imp.xxxxxxx.net/c/<account>/<ad>/<campaign>?u=https%3A%2F%2Fwww.udemy.com%2Fcourse%2Fslug%2F
+```
+
+1. In the Impact marketplace, open the Udemy program and **copy the tracking
+   link once**.
+2. Paste it into **Skills → Affiliate → Deep-link base**, with network set to
+   `impact`.
+3. The tab renders a live sample link. Click it once and confirm the click
+   registers in Impact before trusting it.
+
+Every course in the catalogue — including ones added later — is then tracked,
+and switching network later re-points all of them at once.
+
+If your program issues a format that does not take `u`, use the `custom`
+network with a template containing `{encoded_url}`.
 
 Two deliberate behaviours:
 
@@ -234,6 +280,8 @@ when Helm logged plenty means your link configuration is wrong.
 | `POST /api/learning-plans/:id/push-tasks` | Create tasks from the plan |
 | `POST /api/udemy/search` | Search the Udemy catalogue |
 | `POST /api/udemy/import` | Add a course by URL |
+| `POST /api/learning-resources/bulk` | Import a pasted list of courses |
+| `POST /api/learning-resources/check` | Re-check catalogued URLs, flag dead ones |
 | `GET /api/learning-resources/:id/go` | Logged affiliate redirect |
 | `GET`/`PATCH /api/affiliate-settings` | Link configuration |
 | `GET /api/affiliate-report?days=` | Clicks by course and by day |

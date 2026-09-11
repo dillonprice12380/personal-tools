@@ -21,6 +21,9 @@ const COLUMNS: ColumnMigration[] = [
   { table: 'seo_sites', column: 'authority_json', definition: "TEXT NOT NULL DEFAULT '{}'" },
   // Where a tracked keyword came from: typed in, or discovered via GSC.
   { table: 'seo_keywords', column: 'source', definition: "TEXT NOT NULL DEFAULT 'manual'" },
+  // Link health for catalogued courses, added with the bulk importer.
+  { table: 'learning_resources', column: 'checked_at', definition: 'TEXT' },
+  { table: 'learning_resources', column: 'check_status', definition: 'INTEGER NOT NULL DEFAULT 0' },
 ];
 
 function columnExists(db: BetterSqlite3.Database, table: string, column: string): boolean {
