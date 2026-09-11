@@ -125,6 +125,23 @@ function buildAlerts(): Alert[] {
     });
   }
 
+  const overdueLearning = scalar<number>(
+    `SELECT COUNT(*) FROM learning_plan_items i
+       JOIN learning_plans p ON p.id = i.plan_id
+      WHERE p.status = 'active' AND i.status NOT IN ('done', 'skipped')
+        AND i.due_date IS NOT NULL AND i.due_date < date('now')`,
+    [],
+    0
+  );
+  if (overdueLearning) {
+    push({
+      severity: 'info',
+      module: 'skills',
+      message: `${overdueLearning} learning plan step${overdueLearning > 1 ? 's are' : ' is'} past due`,
+      link: '/skills',
+    });
+  }
+
   return alerts;
 }
 
@@ -313,6 +330,27 @@ dashboardRouter.get(
           `SELECT COUNT(*) FROM seo_keywords k
             WHERE (SELECT ai_overview FROM seo_rankings r WHERE r.keyword_id = k.id
                     ORDER BY checked_on DESC LIMIT 1) = 1`,
+          [],
+          0
+        ),
+      },
+
+      skills: {
+        tracked: scalar<number>('SELECT COUNT(*) FROM skills WHERE archived = 0', [], 0),
+        assessed: scalar<number>('SELECT COUNT(DISTINCT skill_id) FROM skill_assessments', [], 0),
+        active_plan: get(
+          `SELECT id, name, weekly_minutes FROM learning_plans
+            WHERE status = 'active' ORDER BY created_at DESC LIMIT 1`
+        ) ?? null,
+        steps_open: scalar<number>(
+          `SELECT COUNT(*) FROM learning_plan_items i
+             JOIN learning_plans p ON p.id = i.plan_id
+            WHERE p.status = 'active' AND i.status NOT IN ('done', 'skipped')`,
+          [],
+          0
+        ),
+        course_clicks_30d: scalar<number>(
+          `SELECT COUNT(*) FROM affiliate_clicks WHERE clicked_at >= datetime('now', '-30 days')`,
           [],
           0
         ),

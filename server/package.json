@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test --import tsx test/*.test.ts",
     "seed": "tsx src/seed.ts",
-    "video": "tsx src/services/video/cli.ts"
+    "video": "tsx src/services/video/cli.ts",
+    "skills:import": "tsx src/services/skills/cli.ts"
   },
   "dependencies": {
     "@resvg/resvg-js": "^2.6.2",

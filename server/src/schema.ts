@@ -550,4 +550,141 @@ CREATE TABLE IF NOT EXISTS savings_goals (
   account_id   INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
   created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- -------------------------------------------------------------- skills ----
+-- A local skills taxonomy, so the gap analyser is arithmetic over rows rather
+-- than a question put to a language model. Every level is normalised to 0-100
+-- on the way in, whatever scale the source used (O*NET importance is 1-5, its
+-- level is 0-7), so the comparisons in services/skills/gap.ts never need to
+-- know where a row came from.
+CREATE TABLE IF NOT EXISTS skills (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  code         TEXT NOT NULL UNIQUE,           -- 'onet:2.A.1.a', 'tech:kubernetes'
+  name         TEXT NOT NULL,
+  category     TEXT NOT NULL DEFAULT '',       -- Basic Skills | Knowledge | Technology | ...
+  description  TEXT NOT NULL DEFAULT '',
+  source       TEXT NOT NULL DEFAULT 'custom', -- onet | starter | custom
+  -- Extra words appended when searching a course catalogue. O*NET names are
+  -- abstract ("Systems Analysis"); a course search wants "systems analysis
+  -- requirements engineering".
+  search_terms TEXT NOT NULL DEFAULT '',
+  archived     INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_skills_category ON skills(category);
+
+CREATE TABLE IF NOT EXISTS occupations (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  code        TEXT NOT NULL UNIQUE,            -- O*NET-SOC, e.g. '15-1252.00'
+  title       TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  source      TEXT NOT NULL DEFAULT 'custom',
+  archived    INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- The required-proficiency matrix. This table *is* the skills database: one row
+-- per (role, skill) saying how much the role needs it and how much it matters.
+-- A gap report is a join of this against the latest self-assessment.
+CREATE TABLE IF NOT EXISTS occupation_skills (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  occupation_id  INTEGER NOT NULL REFERENCES occupations(id) ON DELETE CASCADE,
+  skill_id       INTEGER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+  importance     INTEGER NOT NULL DEFAULT 50,  -- 0-100
+  required_level INTEGER NOT NULL DEFAULT 50,  -- 0-100
+  UNIQUE(occupation_id, skill_id)
+);
+CREATE INDEX IF NOT EXISTS idx_occupation_skills_occ ON occupation_skills(occupation_id);
+
+-- Self-assessment history: one row per rating rather than one column per skill,
+-- so "am I actually getting better" is a query instead of a memory.
+CREATE TABLE IF NOT EXISTS skill_assessments (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  skill_id    INTEGER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+  level       INTEGER NOT NULL DEFAULT 0,      -- 0-100
+  evidence    TEXT NOT NULL DEFAULT '',
+  assessed_on TEXT NOT NULL DEFAULT (date('now')),
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_skill_assessments_skill
+  ON skill_assessments(skill_id, assessed_on DESC, id DESC);
+
+-- Course catalogue. Udemy rows arrive from the affiliate API or from a pasted
+-- course URL; provider 'manual' covers everything else - a book, a docs site,
+-- a conference talk.
+CREATE TABLE IF NOT EXISTS learning_resources (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  skill_id     INTEGER REFERENCES skills(id) ON DELETE CASCADE,
+  provider     TEXT NOT NULL DEFAULT 'manual', -- udemy | manual
+  external_id  TEXT NOT NULL DEFAULT '',
+  title        TEXT NOT NULL,
+  url          TEXT NOT NULL DEFAULT '',
+  instructor   TEXT NOT NULL DEFAULT '',
+  headline     TEXT NOT NULL DEFAULT '',
+  image_url    TEXT NOT NULL DEFAULT '',
+  price_cents  INTEGER NOT NULL DEFAULT 0,
+  currency     TEXT NOT NULL DEFAULT 'USD',
+  rating       REAL NOT NULL DEFAULT 0,
+  reviews      INTEGER NOT NULL DEFAULT 0,
+  students     INTEGER NOT NULL DEFAULT 0,
+  duration_minutes INTEGER NOT NULL DEFAULT 0,
+  level        TEXT NOT NULL DEFAULT '',       -- beginner | intermediate | expert | all
+  hidden       INTEGER NOT NULL DEFAULT 0,
+  synced_at    TEXT,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_learning_resources_skill ON learning_resources(skill_id);
+-- Partial, so the many manual rows that have no external id do not collide on ''.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_learning_resources_external
+  ON learning_resources(provider, external_id) WHERE external_id != '';
+
+CREATE TABLE IF NOT EXISTS learning_plans (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  occupation_id  INTEGER REFERENCES occupations(id) ON DELETE SET NULL,
+  name           TEXT NOT NULL DEFAULT '',
+  status         TEXT NOT NULL DEFAULT 'active', -- active | done | archived
+  weekly_minutes INTEGER NOT NULL DEFAULT 180,
+  start_date     TEXT NOT NULL DEFAULT (date('now')),
+  target_date    TEXT,
+  -- Readiness at the moment the plan was generated, so the UI can show movement
+  -- against where you started rather than only where you are.
+  baseline_json  TEXT NOT NULL DEFAULT '{}',
+  project_id     INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS learning_plan_items (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  plan_id       INTEGER NOT NULL REFERENCES learning_plans(id) ON DELETE CASCADE,
+  skill_id      INTEGER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+  resource_id   INTEGER REFERENCES learning_resources(id) ON DELETE SET NULL,
+  position      INTEGER NOT NULL DEFAULT 0,
+  status        TEXT NOT NULL DEFAULT 'todo',   -- todo | in_progress | done | skipped
+  from_level    INTEGER NOT NULL DEFAULT 0,
+  target_level  INTEGER NOT NULL DEFAULT 0,
+  importance    INTEGER NOT NULL DEFAULT 50,
+  estimate_minutes INTEGER NOT NULL DEFAULT 0,
+  due_date      TEXT,
+  task_id       INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+  notes         TEXT NOT NULL DEFAULT '',
+  completed_at  TEXT,
+  UNIQUE(plan_id, skill_id)
+);
+CREATE INDEX IF NOT EXISTS idx_learning_plan_items_plan ON learning_plan_items(plan_id, position);
+
+-- Affiliate click log. Helm builds the outbound link itself and records the hop,
+-- so what was clicked here can be reconciled against the network's own report
+-- instead of taken on faith.
+CREATE TABLE IF NOT EXISTS affiliate_clicks (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  resource_id  INTEGER REFERENCES learning_resources(id) ON DELETE CASCADE,
+  plan_item_id INTEGER REFERENCES learning_plan_items(id) ON DELETE SET NULL,
+  network      TEXT NOT NULL DEFAULT '',
+  target_url   TEXT NOT NULL DEFAULT '',
+  clicked_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_affiliate_clicks_resource
+  ON affiliate_clicks(resource_id, clicked_at DESC);
+
 `;

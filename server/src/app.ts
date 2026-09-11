@@ -14,6 +14,7 @@ import { seoRouter } from './routes/seo.js';
 import { budgetRouter } from './routes/budget.js';
 import { businessRouter } from './routes/business.js';
 import { videoRouter } from './routes/video.js';
+import { skillsRouter } from './routes/skills.js';
 import { dashboardRouter } from './routes/dashboard.js';
 
 export function createApp() {
@@ -40,6 +41,7 @@ export function createApp() {
   api.use(budgetRouter);
   api.use(businessRouter);
   api.use(videoRouter);
+  api.use(skillsRouter);
   app.use('/api', api);
 
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Unknown API endpoint')));
