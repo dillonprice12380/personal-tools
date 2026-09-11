@@ -630,6 +630,14 @@ CREATE TABLE IF NOT EXISTS learning_resources (
   duration_minutes INTEGER NOT NULL DEFAULT 0,
   level        TEXT NOT NULL DEFAULT '',       -- beginner | intermediate | expert | all
   hidden       INTEGER NOT NULL DEFAULT 0,
+  -- The one course to use for this skill: what the analyser shows and what a
+  -- generated plan picks up. Without it the best-rated row wins, which is the
+  -- right default but not always the right answer.
+  pinned       INTEGER NOT NULL DEFAULT 0,
+  -- The stored URL already carries affiliate tracking, so click-time
+  -- decoration is skipped. Wrapping a tracking link in another tracking link
+  -- produces a URL that breaks attribution rather than doubling it.
+  pre_tracked  INTEGER NOT NULL DEFAULT 0,
   synced_at    TEXT,
   -- Link health. A dead affiliate link earns nothing and costs trust, so the
   -- catalogue records when each URL was last reached and what it answered.

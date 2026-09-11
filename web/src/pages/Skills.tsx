@@ -30,6 +30,17 @@ type GapItem = {
   unassessed: boolean;
   required_label: string;
   current_label: string;
+  reference: ReferenceLink | null;
+};
+
+type ReferenceLink = {
+  id: number;
+  title: string;
+  url: string;
+  provider: string;
+  pinned: number;
+  pre_tracked: number;
+  go_url: string;
 };
 
 type GapReport = {
@@ -118,7 +129,7 @@ const STATUS_TONE: Record<GapItem['status'], '' | 'good' | 'warning' | 'serious'
 };
 
 export function SkillsPage() {
-  const [tab, setTab] = useState<'gap' | 'assess' | 'plan' | 'courses' | 'affiliate'>('gap');
+  const [tab, setTab] = useState<'gap' | 'assess' | 'plan' | 'courses' | 'manage' | 'affiliate'>('gap');
   const occupations = useApi<ListResponse<Occupation>>('/occupations?archived=0');
   const [targetId, setTargetId] = useState<number | null>(null);
 
@@ -178,6 +189,7 @@ export function SkillsPage() {
                 { id: 'assess', label: 'Self-assessment' },
                 { id: 'plan', label: 'Plan' },
                 { id: 'courses', label: 'Courses' },
+                { id: 'manage', label: 'Manage' },
                 { id: 'affiliate', label: 'Affiliate' },
               ]}
               active={tab}
@@ -187,6 +199,7 @@ export function SkillsPage() {
             {tab === 'assess' && <AssessTab occupationId={target} />}
             {tab === 'plan' && <PlanTab occupationId={target} />}
             {tab === 'courses' && <CoursesTab />}
+            {tab === 'manage' && <ManageTab occupationId={target} onChanged={() => void occupations.reload()} />}
             {tab === 'affiliate' && <AffiliateTab />}
           </>
         )}
@@ -275,6 +288,7 @@ function GapTab({ occupationId }: { occupationId: number | null }) {
                     <th className="right">Gap</th>
                     <th className="right">Importance</th>
                     <th>Status</th>
+                    <th>Learn it</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -291,6 +305,19 @@ function GapTab({ occupationId }: { occupationId: number | null }) {
                       <td className="right muted">{item.importance}</td>
                       <td>
                         <Chip tone={STATUS_TONE[item.status]}>{item.status}</Chip>
+                      </td>
+                      <td className="truncate">
+                        {item.reference ? (
+                          <a
+                            href={item.reference.go_url}
+                            target="_blank"
+                            rel="noopener noreferrer nofollow sponsored"
+                          >
+                            {item.reference.title}
+                          </a>
+                        ) : (
+                          <span className="muted small">no link yet</span>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -1043,6 +1070,422 @@ SEO | https://www.udemy.com/course/slug/ | The SEO Bootcamp`}
         )}
       </div>
     </Modal>
+  );
+}
+
+// ----------------------------------------------------------------- manage ----
+
+type ManagedSkill = {
+  id: number;
+  code: string;
+  name: string;
+  category: string;
+  search_terms: string;
+  source: string;
+  archived: number;
+  resource_count: number;
+  reference: ReferenceLink | null;
+};
+
+/**
+ * The admin screen: the skills themselves, a reference link per skill, and
+ * what each role requires. Everything the analyser reads, editable in one
+ * place.
+ */
+function ManageTab({
+  occupationId,
+  onChanged,
+}: {
+  occupationId: number | null;
+  onChanged: () => void;
+}) {
+  const [section, setSection] = useState<'skills' | 'role'>('skills');
+  return (
+    <div className="stack" style={{ gap: 14 }}>
+      <Tabs
+        tabs={[
+          { id: 'skills', label: 'Skills & links' },
+          { id: 'role', label: 'Role requirements' },
+        ]}
+        active={section}
+        onChange={setSection}
+      />
+      {section === 'skills' ? (
+        <ManageSkills />
+      ) : (
+        <ManageRequirements occupationId={occupationId} onChanged={onChanged} />
+      )}
+    </div>
+  );
+}
+
+function ManageSkills() {
+  const skills = useApi<ListResponse<ManagedSkill>>('/skills?archived=0&limit=500');
+  const [filter, setFilter] = useState('');
+  const [adding, setAdding] = useState(false);
+
+  const rows = (skills.data?.items ?? []).filter(
+    (s) =>
+      !filter ||
+      s.name.toLowerCase().includes(filter.toLowerCase()) ||
+      s.category.toLowerCase().includes(filter.toLowerCase())
+  );
+  const withLink = rows.filter((s) => s.reference).length;
+
+  return (
+    <div className="stack" style={{ gap: 14 }}>
+      <Card>
+        <div className="row" style={{ alignItems: 'flex-end', gap: 10 }}>
+          <Field label="Filter">
+            <input
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="name or category"
+            />
+          </Field>
+          <span className="spacer" />
+          <span className="small muted">
+            {withLink} of {rows.length} skill(s) have a reference link
+          </span>
+          <button className="btn primary" onClick={() => setAdding(true)}>
+            Add a skill
+          </button>
+        </div>
+        <p className="small muted" style={{ margin: 0 }}>
+          Paste any link you want the analyser to show for a skill and press Save. An
+          already-tracked affiliate link is detected and passed straight through at click time —
+          Helm will not wrap it a second time. Anything else gets your affiliate link built onto it
+          when someone clicks.
+        </p>
+      </Card>
+
+      <Card title="Skills" padded={false}>
+        <div className="table-wrap">
+          <table className="data">
+            <thead>
+              <tr>
+                <th>Skill</th>
+                <th>Category</th>
+                <th style={{ width: '42%' }}>Reference link</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((skill) => (
+                <SkillRow key={skill.id} skill={skill} onChanged={() => void skills.reload()} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {!rows.length && !skills.loading && <Empty icon="◐" title="No skills match" />}
+      </Card>
+
+      {adding && (
+        <AddSkillModal
+          onClose={() => setAdding(false)}
+          onSaved={() => {
+            setAdding(false);
+            void skills.reload();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function SkillRow({ skill, onChanged }: { skill: ManagedSkill; onChanged: () => void }) {
+  const [url, setUrl] = useState(skill.reference?.url ?? '');
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+
+  const dirty = url.trim() !== (skill.reference?.url ?? '');
+
+  const save = async () => {
+    setBusy(true);
+    setNote('');
+    try {
+      const result = await api.put<any>(`/skills/${skill.id}/reference`, { url: url.trim() });
+      setNote(
+        !result.reference
+          ? 'Cleared.'
+          : result.reference.pre_tracked
+            ? 'Saved — already tracked, so it is passed through as is.'
+            : 'Saved — your affiliate link is added at click time.'
+      );
+      onChanged();
+    } catch (err: any) {
+      setNote(err?.message ?? 'Could not save');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <tr>
+      <td>
+        {skill.name}
+        <div className="small muted">{skill.code}</div>
+      </td>
+      <td className="muted">{skill.category}</td>
+      <td>
+        <div className="row" style={{ gap: 6 }}>
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://…"
+            style={{ flex: 1, fontSize: 12 }}
+            onKeyDown={(e) => e.key === 'Enter' && dirty && save()}
+          />
+          <button className="btn sm" disabled={!dirty || busy} onClick={save}>
+            {busy ? '…' : 'Save'}
+          </button>
+        </div>
+        {note && <div className="small muted">{note}</div>}
+        {skill.reference && !note && (
+          <div className="small muted">
+            {skill.reference.pre_tracked ? 'pre-tracked link' : 'tracked at click time'}
+            {' · '}
+            <a
+              href={skill.reference.go_url}
+              target="_blank"
+              rel="noopener noreferrer nofollow sponsored"
+            >
+              test it
+            </a>
+          </div>
+        )}
+      </td>
+      <td className="right">
+        <ConfirmButton
+          className="btn sm ghost"
+          confirmLabel="Archive?"
+          onConfirm={async () => {
+            await api.patch(`/skills/${skill.id}`, { archived: 1 });
+            onChanged();
+          }}
+        >
+          Archive
+        </ConfirmButton>
+      </td>
+    </tr>
+  );
+}
+
+function AddSkillModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = useState('');
+  const [category, setCategory] = useState('');
+  const [terms, setTerms] = useState('');
+  const [url, setUrl] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const skill = await api.post<{ id: number }>('/skills', {
+        name,
+        category: category || 'Custom',
+        search_terms: terms,
+      });
+      if (url.trim()) await api.put(`/skills/${skill.id}/reference`, { url: url.trim() });
+      onSaved();
+    } catch (err: any) {
+      setError(err?.message ?? 'Could not add the skill');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      title="Add a skill"
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn ghost" onClick={onClose}>Cancel</button>
+          <button className="btn primary" disabled={!name.trim() || busy} onClick={submit}>
+            {busy ? 'Saving…' : 'Add skill'}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <Banner tone="error">{error}</Banner>
+        <Field label="Name">
+          <input value={name} onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <Field label="Category" hint="Groups it on the assessment screen">
+          <input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Custom" />
+        </Field>
+        <Field label="Search terms" hint="Extra words used when looking for courses">
+          <input value={terms} onChange={(e) => setTerms(e.target.value)} />
+        </Field>
+        <Field label="Reference link" hint="Optional — you can add it later">
+          <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" />
+        </Field>
+        <div className="small muted">
+          A new skill is not required by any role until you add it under <strong>Role
+          requirements</strong>.
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function ManageRequirements({
+  occupationId,
+  onChanged,
+}: {
+  occupationId: number | null;
+  onChanged: () => void;
+}) {
+  const reqs = useApi<{ items: any[] }>(
+    occupationId ? `/occupations/${occupationId}/requirements` : null,
+    [occupationId]
+  );
+  const skills = useApi<ListResponse<ManagedSkill>>('/skills?archived=0&limit=500');
+  type Requirement = { importance: number; required_level: number };
+  const [draft, setDraft] = useState<Record<number, Requirement> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+
+  const current: Record<number, Requirement> =
+    draft ??
+    Object.fromEntries(
+      (reqs.data?.items ?? []).map((r: any) => [
+        r.skill_id,
+        { importance: r.importance, required_level: r.required_level },
+      ])
+    );
+
+  const set = (skillId: number, key: 'importance' | 'required_level', value: number) => {
+    setDraft({ ...current, [skillId]: { ...current[skillId], [key]: value } });
+    setNote('');
+  };
+
+  const save = async () => {
+    if (!occupationId) return;
+    setBusy(true);
+    try {
+      await api.put(`/occupations/${occupationId}/requirements`, {
+        items: Object.entries(current).map(([skillId, v]) => ({
+          skill_id: Number(skillId),
+          ...(v as Requirement),
+        })),
+      });
+      setDraft(null);
+      setNote('Saved.');
+      await reqs.reload();
+      onChanged();
+    } catch (err: any) {
+      setNote(err?.message ?? 'Could not save');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!occupationId) return <Card><Empty icon="◐" title="Pick a target role first" /></Card>;
+
+  const byId = new Map((skills.data?.items ?? []).map((s) => [s.id, s]));
+  const unused = (skills.data?.items ?? []).filter((s) => current[s.id] === undefined);
+
+  return (
+    <div className="stack" style={{ gap: 14 }}>
+      <Card>
+        <div className="row" style={{ alignItems: 'center' }}>
+          <div className="small muted">
+            What this role needs, and how much it leans on each skill. Both are 0–100; the gap
+            report ranks by <strong>gap × importance</strong>, so importance is what decides the
+            order you learn things in.
+          </div>
+          <span className="spacer" />
+          <button className="btn primary" disabled={!draft || busy} onClick={save}>
+            {busy ? 'Saving…' : draft ? 'Save changes' : 'Saved'}
+          </button>
+        </div>
+        {note && <Banner tone={note === 'Saved.' ? 'ok' : 'error'}>{note}</Banner>}
+      </Card>
+
+      <Card title="Requirements" padded={false}>
+        <div className="table-wrap">
+          <table className="data">
+            <thead>
+              <tr>
+                <th>Skill</th>
+                <th className="right">Importance</th>
+                <th className="right">Required level</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(current).map(([id, value]) => {
+                const skillId = Number(id);
+                const req = value as Requirement;
+                return (
+                  <tr key={skillId}>
+                    <td>{byId.get(skillId)?.name ?? `Skill ${skillId}`}</td>
+                    <td className="right">
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={req.importance}
+                        onChange={(e) => set(skillId, 'importance', Number(e.target.value))}
+                        style={{ width: 70, textAlign: 'right' }}
+                      />
+                    </td>
+                    <td className="right">
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={req.required_level}
+                        onChange={(e) => set(skillId, 'required_level', Number(e.target.value))}
+                        style={{ width: 70, textAlign: 'right' }}
+                      />
+                    </td>
+                    <td className="right">
+                      <button
+                        className="btn sm ghost"
+                        onClick={() => {
+                          const next = { ...current };
+                          delete next[skillId];
+                          setDraft(next);
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      {unused.length > 0 && (
+        <Card title="Add a skill to this role">
+          <select
+            defaultValue=""
+            onChange={(e) => {
+              const id = Number(e.target.value);
+              if (id) setDraft({ ...current, [id]: { importance: 50, required_level: 50 } });
+              e.target.value = '';
+            }}
+          >
+            <option value="">Choose a skill…</option>
+            {unused.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name} ({s.category})
+              </option>
+            ))}
+          </select>
+          <span className="small muted"> Added at 50/50 — adjust, then save.</span>
+        </Card>
+      )}
+    </div>
   );
 }
 

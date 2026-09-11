@@ -4,6 +4,7 @@ import {
   AFFILIATE_DEFAULTS,
   buildAffiliateUrl,
   buildSearchUrl,
+  looksPreTracked,
   normaliseUdemyUrl,
   parseBulkCourseLines,
   parseContentDuration,
@@ -244,4 +245,35 @@ test('sub id tagging can be turned off without breaking the link', () => {
   const url = new URL(link!.url);
   assert.equal(url.searchParams.get('subId1'), null);
   assert.equal(url.searchParams.get('u'), COURSE, 'the destination still rides along');
+});
+
+test('a link that is already an affiliate redirector is recognised', () => {
+  // Wrapping one of these again points a redirector at a redirector, which
+  // breaks attribution rather than doubling it.
+  for (const tracked of [
+    'https://click.linksynergy.com/deeplink?id=P&mid=39197&murl=https%3A%2F%2Fwww.udemy.com%2Fcourse%2Fx%2F',
+    'https://imp.i384100.net/c/1234567/890123/45678',
+    'https://prf.hn/click/camref:1011l123/destination:https%3A%2F%2Fudemy.com',
+    'https://www.anrdoezrs.net/links/123/type/dlg/https://www.udemy.com/',
+    'https://go.skimresources.com/?id=123&url=https%3A%2F%2Fudemy.com',
+  ]) {
+    assert.equal(looksPreTracked(tracked), true, tracked);
+  }
+});
+
+test('a plain course URL is not mistaken for a tracked one', () => {
+  assert.equal(looksPreTracked(COURSE), false);
+  assert.equal(looksPreTracked('https://example.com/a-book'), false);
+  assert.equal(looksPreTracked('https://docs.example.com/guide?page=2&sort=asc'), false);
+  assert.equal(looksPreTracked('not a url'), false);
+  assert.equal(looksPreTracked(''), false);
+});
+
+test('an unknown redirector is still caught by its wrapped destination', () => {
+  // The host list can never be complete, so the shape they all share - a param
+  // whose value is itself a URL - is the second signal.
+  assert.equal(
+    looksPreTracked('https://some-new-network.example/go?dest=https%3A%2F%2Fwww.udemy.com%2Fcourse%2Fx%2F'),
+    true
+  );
 });

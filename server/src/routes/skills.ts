@@ -25,6 +25,7 @@ import {
 import {
   AFFILIATE_DEFAULTS,
   buildAffiliateUrl,
+  looksPreTracked,
   normaliseUdemyUrl,
   parseBulkCourseLines,
   parseUdemyCourse,
@@ -133,6 +134,7 @@ skillsRouter.use(
           [row.id],
           0
         ),
+        reference: referenceFor(row.id),
       };
     },
   })
@@ -332,6 +334,113 @@ skillsRouter.get(
   })
 );
 
+/**
+ * The reference link for a skill: paste a URL, save, done.
+ *
+ * The simple path, and the one that needs no API of any kind. Under it this is
+ * still an ordinary catalogue row - pinned, so the analyser and the planner
+ * both reach for it - which keeps one mental model ("a link per skill") over a
+ * data model that can hold several.
+ *
+ * Any http(s) URL is accepted, not just Udemy: a book, a docs site or another
+ * network's link are all legitimate references. An already-tracked link is
+ * detected and passed through untouched at click time.
+ */
+skillsRouter.put(
+  '/skills/:id/reference',
+  wrap((req, res) => {
+    const skillId = toInt(req.params.id);
+    const skill = get<{ id: number; name: string }>('SELECT id, name FROM skills WHERE id = ?', [
+      skillId,
+    ]);
+    if (!skill) throw notFound('Skill');
+
+    const raw = String(req.body?.url ?? '').trim();
+
+    // An empty URL clears the reference rather than erroring: unpinning is how
+    // you undo this, and it should not require finding a different screen.
+    if (!raw) {
+      run('UPDATE learning_resources SET pinned = 0 WHERE skill_id = ?', [skillId]);
+      logActivity('skills', skillId, 'update', `reference link cleared for ${skill.name}`);
+      return res.json({ skill_id: skillId, reference: null });
+    }
+
+    const url = safeOutboundUrl(raw);
+    if (!url) throw badRequest('The reference must be an absolute http(s) URL');
+
+    const preTracked =
+      req.body?.pre_tracked === undefined ? looksPreTracked(url) : !!req.body.pre_tracked;
+    const title = String(req.body?.title ?? '').trim() || titleFromUrl(url) || skill.name;
+
+    let resourceId = 0;
+    db.transaction(() => {
+      // Only one reference per skill; an existing row for the same URL is
+      // reused so a re-save does not accumulate duplicates.
+      const existing = get<{ id: number }>(
+        'SELECT id FROM learning_resources WHERE skill_id = ? AND url = ?',
+        [skillId, url]
+      );
+      if (existing) {
+        run(
+          `UPDATE learning_resources
+              SET title = ?, pre_tracked = ?, hidden = 0 WHERE id = ?`,
+          [title, preTracked ? 1 : 0, existing.id]
+        );
+        resourceId = existing.id;
+      } else {
+        const info = run(
+          `INSERT INTO learning_resources
+             (skill_id, provider, title, url, pre_tracked, pinned)
+           VALUES (?, 'manual', ?, ?, ?, 1)`,
+          [skillId, title, url, preTracked ? 1 : 0]
+        );
+        resourceId = Number(info.lastInsertRowid);
+      }
+      run('UPDATE learning_resources SET pinned = 0 WHERE skill_id = ? AND id != ?', [
+        skillId,
+        resourceId,
+      ]);
+      run('UPDATE learning_resources SET pinned = 1 WHERE id = ?', [resourceId]);
+    })();
+
+    logActivity('skills', skillId, 'update', `reference link set for ${skill.name}`);
+    res.json({ skill_id: skillId, reference: referenceFor(skillId) });
+  })
+);
+
+/** A readable title from a URL, so a bare paste does not save as "https://…". */
+function titleFromUrl(url: string): string {
+  try {
+    const path = new URL(url).pathname.replace(/\/+$/, '');
+    const last = path.split('/').filter(Boolean).pop() ?? '';
+    if (!last) return new URL(url).hostname.replace(/^www\./, '');
+    return last.replace(/[-_]+/g, ' ').replace(/\.[a-z0-9]{2,5}$/i, '').trim();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * The course the analyser should show for a skill: the pinned one if there is
+ * one, otherwise the best-rated row in the catalogue.
+ */
+function referenceFor(skillId: number) {
+  const row = get<any>(
+    `SELECT id, title, url, provider, pinned, pre_tracked, rating, duration_minutes, price_cents, currency
+       FROM learning_resources
+      WHERE skill_id = ? AND hidden = 0
+      ORDER BY pinned DESC, rating DESC, reviews DESC, id ASC
+      LIMIT 1`,
+    [skillId]
+  );
+  if (!row) return null;
+  return {
+    ...row,
+    // Always the local hop, never the destination: that is what logs the click.
+    go_url: `/api/learning-resources/${row.id}/go`,
+  };
+}
+
 // ------------------------------------------------------------ gap report ----
 
 function requirementRows(occupationId: number): SkillRequirement[] {
@@ -371,6 +480,9 @@ skillsRouter.get(
         ...row,
         required_label: proficiencyLabel(row.required_level),
         current_label: proficiencyLabel(row.current_level),
+        // This is the "click here to learn it" link the whole module exists to
+        // put in front of someone looking at their own gap.
+        reference: referenceFor(row.skill_id),
       })),
       settings,
     });
@@ -382,7 +494,7 @@ skillsRouter.get(
 const RESOURCE_COLUMNS = [
   'skill_id', 'provider', 'external_id', 'title', 'url', 'instructor', 'headline',
   'image_url', 'price_cents', 'currency', 'rating', 'reviews', 'students',
-  'duration_minutes', 'level', 'hidden',
+  'duration_minutes', 'level', 'hidden', 'pinned', 'pre_tracked',
 ];
 
 /**
@@ -394,15 +506,23 @@ skillsRouter.get(
   '/learning-resources/:id/go',
   wrap((req, res) => {
     const id = toInt(req.params.id);
-    const resource = get<{ id: number; url: string; title: string }>(
-      'SELECT id, url, title FROM learning_resources WHERE id = ?',
+    const resource = get<{ id: number; url: string; title: string; pre_tracked: number }>(
+      'SELECT id, url, title, pre_tracked FROM learning_resources WHERE id = ?',
       [id]
     );
     if (!resource) throw notFound('Resource');
 
-    const link = buildAffiliateUrl(resource.url, affiliateConfig(), {
-      subId: subIdForResource(resource.id),
-    });
+    // A link that already carries its own tracking is sent on untouched.
+    // Decorating it would point one redirector at another, which breaks the
+    // attribution rather than doubling it.
+    const link = resource.pre_tracked
+      ? (() => {
+          const safe = safeOutboundUrl(resource.url);
+          return safe ? { url: safe, network: 'pasted', tracked: true } : null;
+        })()
+      : buildAffiliateUrl(resource.url, affiliateConfig(), {
+          subId: subIdForResource(resource.id),
+        });
     if (!link) throw badRequest('This resource has no usable URL');
 
     run(
@@ -569,16 +689,20 @@ skillsRouter.use(
         const safe = safeOutboundUrl(String(data.url));
         if (!safe) throw badRequest('URL must be an absolute http(s) address');
         data.url = safe;
+        // Detected rather than assumed, and only when the caller has not said
+        // either way - a paste of an already-tracked link is the common case
+        // and silently double-wrapping it would be the damaging one.
+        if (data.pre_tracked === undefined) data.pre_tracked = looksPreTracked(safe) ? 1 : 0;
       }
     },
     hydrate: (row) => {
-      const link = buildAffiliateUrl(row.url, affiliateConfig());
+      const link = row.pre_tracked ? null : buildAffiliateUrl(row.url, affiliateConfig());
       return {
         ...row,
         // The tracked URL is never handed to the browser directly: the click
         // goes through /go so it lands in the click log.
         go_url: `/api/learning-resources/${row.id}/go`,
-        affiliate_network: link?.tracked ? link.network : '',
+        affiliate_network: row.pre_tracked ? 'pasted' : link?.tracked ? link.network : '',
         clicks: scalar<number>(
           'SELECT COUNT(*) FROM affiliate_clicks WHERE resource_id = ?',
           [row.id],
@@ -1078,7 +1202,7 @@ skillsRouter.post(
         const resourceId = scalar<number>(
           `SELECT id FROM learning_resources
             WHERE skill_id = ? AND hidden = 0
-            ORDER BY rating DESC, reviews DESC, id ASC LIMIT 1`,
+            ORDER BY pinned DESC, rating DESC, reviews DESC, id ASC LIMIT 1`,
           [draft.skill_id],
           0
         );

@@ -153,8 +153,10 @@ against the hours you actually have, and pushes each step into Tasks with due
 dates and estimates already set — a learning plan is work, and it belongs where
 the rest of the week's work is.
 
-Each skill carries courses. Paste a Udemy URL, import a list, or pull them
-straight out of an Impact product catalogue. Helm stores the plain course URL
+Each skill carries courses. The simplest path needs no API at all: **Manage**
+gives every skill a field — paste a link, save, and that is what the analyser
+shows. You can also import a list or pull straight from an Impact product
+catalogue. Helm stores the plain course URL
 and builds your tracked link at click time, so switching affiliate network
 re-points every course at once.
 

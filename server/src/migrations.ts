@@ -24,6 +24,9 @@ const COLUMNS: ColumnMigration[] = [
   // Link health for catalogued courses, added with the bulk importer.
   { table: 'learning_resources', column: 'checked_at', definition: 'TEXT' },
   { table: 'learning_resources', column: 'check_status', definition: 'INTEGER NOT NULL DEFAULT 0' },
+  // A chosen course per skill, and links that already carry their own tracking.
+  { table: 'learning_resources', column: 'pinned', definition: 'INTEGER NOT NULL DEFAULT 0' },
+  { table: 'learning_resources', column: 'pre_tracked', definition: 'INTEGER NOT NULL DEFAULT 0' },
 ];
 
 function columnExists(db: BetterSqlite3.Database, table: string, column: string): boolean {

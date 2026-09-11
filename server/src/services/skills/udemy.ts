@@ -361,3 +361,54 @@ export function parseBulkCourseLines(text: string): BulkCourseLine[] {
   }
   return out;
 }
+
+// ------------------------------------------------- already-tracked links ---
+
+/**
+ * Hosts that are themselves affiliate redirectors.
+ *
+ * A link on one of these is already a tracking link. Helm decorates plain
+ * destination URLs at click time, and running that over a link which is
+ * already tracked produces a redirector pointing at a redirector - which does
+ * not double the commission, it breaks the attribution and often 404s.
+ */
+const TRACKING_HOSTS = [
+  'click.linksynergy.com',
+  'linksynergy.com',
+  'impact.com',
+  'prf.hn',            // Partnerize
+  'shareasale.com',
+  'awin1.com',
+  'go.skimresources.com',
+  'redirect.viglink.com',
+  // Commission Junction's rotating redirector domains.
+  'anrdoezrs.net',
+  'dpbolvw.net',
+  'jdoqocy.com',
+  'kqzyfj.com',
+  'tkqlhce.com',
+];
+
+/**
+ * Does this URL already carry affiliate tracking?
+ *
+ * Two signals, because the host list can never be complete: a known
+ * redirector, or the shape they all share - a query parameter whose value is
+ * itself an http(s) URL, which is how a wrapper carries its destination.
+ */
+export function looksPreTracked(raw: string): boolean {
+  const safe = safeOutboundUrl(raw);
+  if (!safe) return false;
+  const url = new URL(safe);
+  const host = url.hostname.toLowerCase();
+
+  if (TRACKING_HOSTS.some((known) => host === known || host.endsWith(`.${known}`))) return true;
+  // Impact issues per-advertiser domains (imp.i384100.net and the like), so
+  // the label rather than the registrable domain is what identifies them.
+  if (/^imp\b/.test(host) || host.includes('.imp.')) return true;
+
+  for (const [, value] of url.searchParams) {
+    if (/^https?:\/\//i.test(value)) return true;
+  }
+  return false;
+}

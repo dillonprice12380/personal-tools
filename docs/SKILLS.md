@@ -159,6 +159,47 @@ params that rode along with the copied link, and stores the course. No
 credentials needed. Without the API there is no metadata to fetch, so the title
 stays editable rather than being invented.
 
+### One link per skill (the simplest path — no API at all)
+
+**Skills → Manage → Skills & links.** Every skill has a field: paste a link,
+press Save. That link is what the gap report shows in its *Learn it* column and
+what a generated plan picks up.
+
+Any `http(s)` URL is accepted — a Udemy course, a book, a docs site, another
+network's link. The saved reference is pinned, so it wins over anything else
+catalogued for that skill, and re-saving the same URL updates the row rather
+than accumulating duplicates. Saving an empty field clears it.
+
+**Already-tracked links are detected and passed through untouched.** This
+matters: Helm normally stores the plain destination and builds your affiliate
+link at click time, so wrapping a link that *already* carries tracking would
+point one redirector at another — which breaks attribution rather than doubling
+it. Two signals catch it: a known redirector host (`click.linksynergy.com`,
+Impact's per-advertiser domains, Partnerize, ShareASale, Awin, CJ's rotating
+domains) and the shape they all share, a query parameter whose value is itself
+a URL. The row shows which mode it is in, with a *test it* link beside it.
+
+So both workflows are supported, and the UI tells you which one a given link
+got:
+
+| What you paste | What happens on click |
+|---|---|
+| `udemy.com/course/slug/` | Helm wraps it with your network link and sub id |
+| A tracking link from your Impact dashboard | Sent on exactly as pasted |
+
+Override the detection by passing `pre_tracked` explicitly to
+`PUT /api/skills/:id/reference` if it ever guesses wrong.
+
+### Role requirements
+
+**Skills → Manage → Role requirements** edits the matrix behind the analyser:
+which skills a role needs, how much it leans on each (`importance`) and the
+proficiency it calls for (`required_level`), both 0-100. Since the report ranks
+by `gap × importance`, importance is what decides the order you learn things in.
+
+Adding a skill to a role starts it at 50/50 — adjust, then save. Saving replaces
+the role's matrix in one transaction.
+
 ### Paste a list (the fast way to fill a catalogue)
 
 **Courses → Paste a list.** One course per line; name the skill by code or by
@@ -332,6 +373,7 @@ when Helm logged plenty means your link configuration is wrong.
 | `POST /api/learning-plans/:id/push-tasks` | Create tasks from the plan |
 | `POST /api/udemy/search` | Search the Udemy catalogue |
 | `POST /api/udemy/import` | Add a course by URL |
+| `PUT /api/skills/:id/reference` | Set (or clear) the one link for a skill |
 | `POST /api/learning-resources/bulk` | Import a pasted list of courses |
 | `POST /api/learning-resources/check` | Re-check catalogued URLs, flag dead ones |
 | `GET /api/learning-resources/:id/go` | Logged affiliate redirect |
