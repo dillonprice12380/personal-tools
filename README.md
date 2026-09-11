@@ -153,11 +153,15 @@ against the hours you actually have, and pushes each step into Tasks with due
 dates and estimates already set — a learning plan is work, and it belongs where
 the rest of the week's work is.
 
-Each skill carries courses. Paste a Udemy URL, or connect the Udemy Affiliate
-API to search the catalogue. Helm stores the plain course URL and builds your
-tracked link at click time, so switching affiliate network re-points every
-course at once, and every click is logged locally to reconcile against the
-network's own report.
+Each skill carries courses. Paste a Udemy URL, import a list, or pull them
+straight out of an Impact product catalogue. Helm stores the plain course URL
+and builds your tracked link at click time, so switching affiliate network
+re-points every course at once.
+
+Connect the Impact API and it closes the loop: every outbound link is stamped
+with a per-course sub id, conversions are pulled back, and earnings are
+reported **per skill** — approved, pending and reversed kept apart, because a
+pending conversion is not money yet.
 
 **[docs/SKILLS.md](docs/SKILLS.md)** covers the import, the scoring and the
 affiliate setup.

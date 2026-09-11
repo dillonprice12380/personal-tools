@@ -32,6 +32,12 @@ export type AffiliateConfig = {
   template: string;
   /** Extra query params added to the Udemy URL itself, e.g. `utm_source=helm`. */
   extraParams: string;
+  /**
+   * Tag outbound links with a per-course sub id, so the network can hand it
+   * back on a conversion and earnings land against a skill rather than in one
+   * undifferentiated total.
+   */
+  useSubId: boolean;
   /** Shown next to every affiliate link in the UI. Required by the FTC, and by Udemy's own terms. */
   disclosure: string;
 };
@@ -43,6 +49,7 @@ export const AFFILIATE_DEFAULTS: AffiliateConfig = {
   linkBase: '',
   template: '',
   extraParams: '',
+  useSubId: true,
   disclosure: 'Contains affiliate links. Helm may earn a commission on purchases made through them.',
 };
 
@@ -115,32 +122,42 @@ export type AffiliateLink = { url: string; network: AffiliateNetwork; tracked: b
  * honest untracked one: the click is lost either way, but the untracked one
  * still gets the reader to the course.
  */
-export function buildAffiliateUrl(rawUrl: string, cfg: AffiliateConfig): AffiliateLink | null {
+export function buildAffiliateUrl(
+  rawUrl: string,
+  cfg: AffiliateConfig,
+  opts: { subId?: string } = {}
+): AffiliateLink | null {
   const destination = safeOutboundUrl(rawUrl);
   if (!destination) return null;
 
   const target = withExtraParams(destination, cfg.extraParams);
   const untracked: AffiliateLink = { url: target, network: cfg.network, tracked: false };
+  const subId = cfg.useSubId ? (opts.subId ?? '') : '';
 
   switch (cfg.network) {
     case 'linksynergy': {
       if (!cfg.publisherId || !cfg.advertiserId) return untracked;
-      const url =
+      let url =
         `https://click.linksynergy.com/deeplink?id=${encodeURIComponent(cfg.publisherId)}` +
         `&mid=${encodeURIComponent(cfg.advertiserId)}` +
         `&murl=${encodeURIComponent(target)}`;
+      // LinkSynergy carries publisher sub-tracking in u1.
+      if (subId) url += `&u1=${encodeURIComponent(subId)}`;
       return { url, network: 'linksynergy', tracked: true };
     }
     case 'impact': {
       const base = safeOutboundUrl(cfg.linkBase);
       if (!base) return untracked;
-      return { url: appendParam(base, 'u', target), network: 'impact', tracked: true };
+      let url = appendParam(base, 'u', target);
+      if (subId) url = appendParam(url, 'subId1', subId);
+      return { url, network: 'impact', tracked: true };
     }
     case 'custom': {
       if (!cfg.template.includes('{url}') && !cfg.template.includes('{encoded_url}')) return untracked;
       const filled = cfg.template
         .replace(/\{encoded_url\}/g, encodeURIComponent(target))
-        .replace(/\{url\}/g, target);
+        .replace(/\{url\}/g, target)
+        .replace(/\{sub_id\}/g, encodeURIComponent(subId));
       const safe = safeOutboundUrl(filled);
       return safe ? { url: safe, network: 'custom', tracked: true } : untracked;
     }

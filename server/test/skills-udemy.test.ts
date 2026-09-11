@@ -214,3 +214,34 @@ test('a title containing a comma survives, because commas are not separators', (
 test('lines with no URL in them are dropped rather than half-imported', () => {
   assert.deepEqual(parseBulkCourseLines('starter:seo | just some notes\n\n   \n'), []);
 });
+
+test('an Impact link carries a per-course sub id, so a payout can find its skill', () => {
+  const link = buildAffiliateUrl(
+    COURSE,
+    cfg({ network: 'impact', linkBase: 'https://imp.example.net/c/1/2/3' }),
+    { subId: 'helm-42' }
+  );
+  const url = new URL(link!.url);
+  assert.equal(url.searchParams.get('u'), COURSE);
+  assert.equal(url.searchParams.get('subId1'), 'helm-42');
+});
+
+test('LinkSynergy carries the same sub id in u1', () => {
+  const link = buildAffiliateUrl(
+    COURSE,
+    cfg({ network: 'linksynergy', publisherId: 'P', advertiserId: 'M' }),
+    { subId: 'helm-42' }
+  );
+  assert.equal(new URL(link!.url).searchParams.get('u1'), 'helm-42');
+});
+
+test('sub id tagging can be turned off without breaking the link', () => {
+  const link = buildAffiliateUrl(
+    COURSE,
+    cfg({ network: 'impact', linkBase: 'https://imp.example.net/c/1/2/3', useSubId: false }),
+    { subId: 'helm-42' }
+  );
+  const url = new URL(link!.url);
+  assert.equal(url.searchParams.get('subId1'), null);
+  assert.equal(url.searchParams.get('u'), COURSE, 'the destination still rides along');
+});

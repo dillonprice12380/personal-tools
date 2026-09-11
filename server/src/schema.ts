@@ -691,4 +691,26 @@ CREATE TABLE IF NOT EXISTS affiliate_clicks (
 CREATE INDEX IF NOT EXISTS idx_affiliate_clicks_resource
   ON affiliate_clicks(resource_id, clicked_at DESC);
 
+-- Conversions pulled back from the affiliate network. Clicks are a proxy for
+-- earnings; these are the earnings. The state column is kept verbatim because a PENDING
+-- action is not money yet and a REVERSED one is money taken back - summing
+-- them all as revenue would overstate it.
+CREATE TABLE IF NOT EXISTS affiliate_actions (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  external_id  TEXT NOT NULL UNIQUE,           -- the network's own action id
+  network      TEXT NOT NULL DEFAULT 'impact',
+  resource_id  INTEGER REFERENCES learning_resources(id) ON DELETE SET NULL,
+  skill_id     INTEGER REFERENCES skills(id) ON DELETE SET NULL,
+  campaign     TEXT NOT NULL DEFAULT '',
+  state        TEXT NOT NULL DEFAULT '',       -- PENDING | APPROVED | REVERSED | ...
+  event_date   TEXT NOT NULL DEFAULT '',
+  sale_cents   INTEGER NOT NULL DEFAULT 0,
+  payout_cents INTEGER NOT NULL DEFAULT 0,
+  currency     TEXT NOT NULL DEFAULT 'USD',
+  sub_id       TEXT NOT NULL DEFAULT '',
+  synced_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_affiliate_actions_skill ON affiliate_actions(skill_id);
+CREATE INDEX IF NOT EXISTS idx_affiliate_actions_date ON affiliate_actions(event_date DESC);
+
 `;

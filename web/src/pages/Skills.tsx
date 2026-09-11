@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { api, useApi, type ListResponse } from '../lib/api';
 import { Banner, Card, Chip, ConfirmButton, Empty, Field, Modal, ProgressBar, Stat, Tabs } from '../components/ui';
 import { RankedBars } from '../components/charts';
-import { formatDate, minutesToHours, money, num, relativeDay } from '../lib/format';
+import { formatDate, formatDateTime, minutesToHours, money, num, relativeDay } from '../lib/format';
 
 type Rung = { value: number; label: string; hint: string };
 
@@ -673,6 +673,34 @@ function CoursesTab() {
   const [searchError, setSearchError] = useState('');
   const [importOpen, setImportOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const catalogs = useApi<{ items: any[]; configured: boolean }>('/impact/catalogs');
+  const [importing, setImporting] = useState(false);
+  const [importNote, setImportNote] = useState('');
+
+  const importFromCatalog = async () => {
+    const catalog = catalogs.data?.items?.[0];
+    if (!catalog || !skillId) return;
+    setImporting(true);
+    setImportNote('');
+    try {
+      const r = await api.post<any>('/impact/catalog-import', {
+        catalog_id: catalog.id,
+        skill_id: skillId,
+        limit: 25,
+      });
+      setImportNote(
+        r.error
+          ? r.error
+          : `Searched "${r.query}" — ${r.returned} match(es), imported ${r.imported}` +
+            (r.skipped ? `, skipped ${r.skipped} that were not Udemy course URLs.` : '.')
+      );
+      await resources.reload();
+    } catch (err: any) {
+      setImportNote(err?.message ?? 'Import failed');
+    } finally {
+      setImporting(false);
+    }
+  };
   const [checking, setChecking] = useState(false);
   const [checkNote, setCheckNote] = useState('');
 
@@ -737,6 +765,11 @@ function CoursesTab() {
           <button className="btn" disabled={!skillId || searching} onClick={runSearch}>
             {searching ? 'Searching…' : 'Search Udemy'}
           </button>
+          {catalogs.data?.configured && (catalogs.data.items ?? []).length > 0 && (
+            <button className="btn" disabled={!skillId || importing} onClick={importFromCatalog}>
+              {importing ? 'Importing…' : 'Import from Impact'}
+            </button>
+          )}
           <button className="btn" disabled={!items.length || checking} onClick={checkLinks}>
             {checking ? 'Checking…' : 'Check links'}
           </button>
@@ -749,6 +782,7 @@ function CoursesTab() {
         </div>
         {searchError && <Banner tone="error">{searchError}</Banner>}
         {checkNote && <Banner tone={checkNote.includes('did not') ? 'error' : 'ok'}>{checkNote}</Banner>}
+        {importNote && <Banner tone={importNote.includes('rejected') ? 'error' : 'ok'}>{importNote}</Banner>}
         {affiliate.data?.disclosure && (
           <div className="small muted">{affiliate.data.disclosure}</div>
         )}
@@ -1028,6 +1062,29 @@ function AffiliateTab() {
   const [form, setForm] = useState<Record<string, string> | null>(null);
   const [saved, setSaved] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
+  const [impactOpen, setImpactOpen] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncNote, setSyncNote] = useState('');
+  const catalogs = useApi<{ items: any[]; error: string | null; configured: boolean }>('/impact/catalogs');
+
+  const syncEarnings = async () => {
+    setSyncing(true);
+    setSyncNote('');
+    try {
+      const r = await api.post<any>('/impact/sync-actions', { days: 90 });
+      setSyncNote(
+        r.error
+          ? r.error
+          : `Synced ${r.stored} conversion(s); ${r.attributed} matched to a course` +
+            (r.unattributed ? `, ${r.unattributed} could not be attributed.` : '.')
+      );
+      void report.reload();
+    } catch (err: any) {
+      setSyncNote(err?.message ?? 'Sync failed');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const current = form ?? (settings.data ? { ...settings.data } : null);
   if (!current) return <div className="muted">Loading…</div>;
@@ -1046,7 +1103,18 @@ function AffiliateTab() {
 
   return (
     <div className="stack" style={{ gap: 14 }}>
-      <div className="grid cols-3">
+      <div className="grid cols-4">
+        <Card>
+          <Stat
+            label="Approved earnings (90d)"
+            value={money(report.data?.earnings?.approved_cents ?? 0)}
+            sub={
+              report.data?.earnings?.synced
+                ? `${money(report.data.earnings.pending_cents)} pending`
+                : 'Sync conversions to populate'
+            }
+          />
+        </Card>
         <Card>
           <Stat label="Clicks (90d)" value={num(report.data?.total_clicks ?? 0)} />
         </Card>
@@ -1060,6 +1128,28 @@ function AffiliateTab() {
                 : 'All tracked'
             }
           />
+        </Card>
+        <Card>
+          <Stat
+            label="Impact API"
+            value={catalogs.data?.configured ? 'Connected' : 'Not connected'}
+            sub={
+              catalogs.data?.configured
+                ? `${catalogs.data.items.length} catalogue(s) visible`
+                : 'Account SID + Auth Token'
+            }
+            small
+          />
+          <div className="row" style={{ gap: 6 }}>
+            <button className="btn sm" onClick={() => setImpactOpen(true)}>
+              {catalogs.data?.configured ? 'Replace' : 'Connect'}
+            </button>
+            {catalogs.data?.configured && (
+              <button className="btn sm" disabled={syncing} onClick={syncEarnings}>
+                {syncing ? 'Syncing…' : 'Sync earnings'}
+              </button>
+            )}
+          </div>
         </Card>
         <Card>
           <Stat
@@ -1077,6 +1167,83 @@ function AffiliateTab() {
           </button>
         </Card>
       </div>
+
+      {syncNote && <Banner tone={syncNote.includes('rejected') || syncNote.includes('failed') ? 'error' : 'ok'}>{syncNote}</Banner>}
+
+      {catalogs.data?.error && <Banner tone="error">{catalogs.data.error}</Banner>}
+
+      {(report.data?.earnings?.synced ?? 0) > 0 && (
+        <Card
+          title="Earnings by skill"
+          actions={
+            <span className="small muted">
+              last synced {formatDateTime(report.data.earnings.last_sync)}
+            </span>
+          }
+        >
+          {report.data.earnings.by_skill.length ? (
+            <div className="table-wrap">
+              <table className="data">
+                <thead>
+                  <tr>
+                    <th>Skill</th>
+                    <th className="right">Conversions</th>
+                    <th className="right">Approved</th>
+                    <th className="right">Pending</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.data.earnings.by_skill.map((row: any) => (
+                    <tr key={row.id}>
+                      <td>{row.skill_name}</td>
+                      <td className="right tabular">{row.conversions}</td>
+                      <td className="right pos">{money(row.approved_cents)}</td>
+                      <td className="right muted">{money(row.pending_cents)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <Empty icon="◇" title="No conversions attributed to a skill yet" />
+          )}
+          <div className="small muted">
+            Approved and pending are kept apart because a pending conversion is not money yet.
+            {report.data.earnings.reversed_cents > 0 &&
+              ` ${money(report.data.earnings.reversed_cents)} has been reversed.`}
+            {report.data.earnings.unattributed > 0 &&
+              ` ${report.data.earnings.unattributed} conversion(s) carried no recognisable tag and are counted in the totals but not against a skill.`}
+          </div>
+        </Card>
+      )}
+
+      {catalogs.data?.configured && (catalogs.data.items ?? []).length > 0 && (
+        <Card title="Impact product catalogues">
+          <p className="small muted" style={{ marginTop: 0 }}>
+            Where the advertiser publishes a feed, importing from it fills the course catalogue
+            without needing Udemy's own API.
+          </p>
+          <div className="table-wrap">
+            <table className="data">
+              <thead>
+                <tr><th>Catalogue</th><th>Programme</th><th className="right">Items</th><th></th></tr>
+              </thead>
+              <tbody>
+                {catalogs.data.items.map((cat: any) => (
+                  <tr key={cat.id}>
+                    <td>{cat.name}</td>
+                    <td className="muted">{cat.campaignName || cat.campaignId}</td>
+                    <td className="right tabular">{num(cat.itemCount)}</td>
+                    <td className="right small muted">
+                      Import from the <strong>Courses</strong> tab
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
 
       <Card title="How outbound links are built">
         <Banner>
@@ -1127,6 +1294,15 @@ function AffiliateTab() {
           <input value={current.extraParams} onChange={(e) => set('extraParams', e.target.value)} />
         </Field>
 
+        <label className="small row" style={{ gap: 8, alignItems: 'center' }}>
+          <input
+            type="checkbox"
+            checked={current.useSubId !== false && String(current.useSubId) !== 'false'}
+            onChange={(e) => set('useSubId', e.target.checked ? 'true' : 'false')}
+          />
+          Tag links with a per-course sub id, so conversions can be traced back to a skill
+        </label>
+
         <Field
           label="Disclosure"
           hint="Shown beside affiliate links. The FTC requires one, and so do Udemy's terms."
@@ -1146,6 +1322,16 @@ function AffiliateTab() {
 
         <button className="btn primary" onClick={save}>Save</button>
       </Card>
+
+      {impactOpen && (
+        <ConnectImpactModal
+          onClose={() => setImpactOpen(false)}
+          onSaved={() => {
+            setImpactOpen(false);
+            void catalogs.reload();
+          }}
+        />
+      )}
 
       {connectOpen && (
         <ConnectUdemyModal
@@ -1257,6 +1443,70 @@ function ConnectUdemyModal({ onClose, onSaved }: { onClose: () => void; onSaved:
         <div className="small muted">
           Saving replaces any Udemy credential already stored — the newest is the one used.
         </div>
+      </div>
+    </Modal>
+  );
+}
+
+/** Impact Account SID + Auth Token. Write-only, like every credential in Helm. */
+function ConnectImpactModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const [accountSid, setAccountSid] = useState('');
+  const [authToken, setAuthToken] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await api.post('/settings/credentials', {
+        service: 'impact',
+        label: 'Impact publisher API',
+        data: { accountSid: accountSid.trim(), authToken: authToken.trim() },
+      });
+      onSaved();
+    } catch (err: any) {
+      setError(err?.message ?? 'Could not save the credentials');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      title="Connect the Impact API"
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn ghost" onClick={onClose}>Cancel</button>
+          <button
+            className="btn primary"
+            disabled={!accountSid.trim() || !authToken.trim() || busy}
+            onClick={submit}
+          >
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <Banner tone="error">{error}</Banner>
+        <Banner>
+          Both values come from your Impact account settings. They unlock two things: importing
+          courses from an advertiser's product catalogue, and pulling your actual conversions back
+          so earnings can be reported per skill.
+        </Banner>
+        <Field label="Account SID">
+          <input value={accountSid} onChange={(e) => setAccountSid(e.target.value)} autoComplete="off" />
+        </Field>
+        <Field label="Auth Token" hint="Encrypted at rest; never returned by the API">
+          <input
+            type="password"
+            value={authToken}
+            onChange={(e) => setAuthToken(e.target.value)}
+            autoComplete="new-password"
+          />
+        </Field>
       </div>
     </Modal>
   );

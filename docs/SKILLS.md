@@ -254,6 +254,53 @@ Two deliberate behaviours:
   a browser wherever the stored row points, so a `javascript:` URL that reached
   the database through an import must not come back out as a `Location` header.
 
+### The Impact API: catalogues and actual earnings
+
+Impact issues every media partner an **Account SID** and **Auth Token** with no
+approval step, which makes this the more reachable of the two APIs — and the
+more useful one. Connect it at **Skills → Affiliate → Impact API → Connect**.
+
+It unlocks two things Udemy's affiliate API does not.
+
+**Product catalogues.** Where the advertiser publishes a feed, it already
+carries the titles, prices and URLs the course catalogue wants. Pick a skill on
+the **Courses** tab and press *Import from Impact*: the feed is searched for
+that skill's name and `search_terms`, and matching Udemy course URLs are stored
+like any other course — as the plain destination, decorated at click time.
+Listings that are not Udemy course URLs are reported rather than stored.
+
+**Conversions.** *Sync earnings* pulls your actions back and reports payouts
+**per skill**, which is the question worth asking: not "how many clicks" but
+"which gap in the analyser actually pays".
+
+Three deliberate choices in how earnings are reported:
+
+- **Approved, pending and reversed are kept apart.** A pending action is not
+  money yet and a reversed one is money taken back. Summing all three as
+  "revenue" would overstate what you have earned, so Helm never does.
+- **Unattributed conversions are still stored.** An action whose sub id Helm
+  does not recognise is real money — it just cannot be traced to a skill.
+  Dropping it would understate your total, so it counts toward the totals and
+  is excluded only from the per-skill breakdown, with the count shown.
+- **Re-syncing is idempotent.** Actions upsert on the network's own id, so
+  running a sync twice does not double your earnings.
+
+#### How a payout finds its skill
+
+Helm stamps `subId1=helm-<resourceId>` on every outbound Impact link (`u1` on
+LinkSynergy, `{sub_id}` in a custom template). Impact hands that tag back on the
+conversion, and Helm maps it to the course, then to the skill.
+
+That is the whole attribution chain:
+
+```
+gap report → course → tracked click (subId1=helm-42) → conversion → skill earnings
+```
+
+Turn the tagging off with the checkbox on the Affiliate tab if you would rather
+use sub ids for something else; links keep working, earnings just arrive
+unattributed.
+
 ### Clicks
 
 Every outbound click goes through `/api/learning-resources/:id/go`, which logs
@@ -289,5 +336,8 @@ when Helm logged plenty means your link configuration is wrong.
 | `POST /api/learning-resources/check` | Re-check catalogued URLs, flag dead ones |
 | `GET /api/learning-resources/:id/go` | Logged affiliate redirect |
 | `GET`/`PATCH /api/affiliate-settings` | Link configuration |
-| `GET /api/affiliate-report?days=` | Clicks by course and by day |
+| `GET /api/affiliate-report?days=` | Clicks, and earnings by skill once synced |
+| `GET /api/impact/catalogs` | Product catalogues the account can see |
+| `POST /api/impact/catalog-import` | Import courses from a catalogue into a skill |
+| `POST /api/impact/sync-actions` | Pull conversions back and attribute them |
 | `GET /api/skills-summary` | Dashboard roll-up |

@@ -15,6 +15,14 @@ import {
 import { buildPlan, planDuration, planProgress } from '../services/skills/plan.js';
 import { STARTER_ROLES, STARTER_SKILLS } from '../services/skills/taxonomy.js';
 import {
+  listActions,
+  listCatalogItems,
+  listCatalogs,
+  resourceIdFromSubId,
+  subIdForResource,
+  type ImpactCredentials,
+} from '../services/skills/impact.js';
+import {
   AFFILIATE_DEFAULTS,
   buildAffiliateUrl,
   normaliseUdemyUrl,
@@ -69,6 +77,21 @@ function udemyCredentials(): UdemyCredentials | null {
     return clientId && clientSecret ? { clientId, clientSecret } : null;
   } catch {
     // HELM_SECRET changed - surfaces in Settings as an undecryptable credential.
+    return null;
+  }
+}
+
+function impactCredentials(): ImpactCredentials | null {
+  const row = get<{ data_enc: string }>(
+    `SELECT data_enc FROM credentials WHERE service = 'impact' ORDER BY id DESC LIMIT 1`
+  );
+  if (!row) return null;
+  try {
+    const data = decryptJson<Record<string, string>>(row.data_enc);
+    const accountSid = data.accountSid ?? data.account_sid ?? data.sid ?? '';
+    const authToken = data.authToken ?? data.auth_token ?? data.token ?? '';
+    return accountSid && authToken ? { accountSid, authToken } : null;
+  } catch {
     return null;
   }
 }
@@ -377,7 +400,9 @@ skillsRouter.get(
     );
     if (!resource) throw notFound('Resource');
 
-    const link = buildAffiliateUrl(resource.url, affiliateConfig());
+    const link = buildAffiliateUrl(resource.url, affiliateConfig(), {
+      subId: subIdForResource(resource.id),
+    });
     if (!link) throw badRequest('This resource has no usable URL');
 
     run(
@@ -727,6 +752,221 @@ skillsRouter.get(
           GROUP BY day ORDER BY day ASC`,
         [since]
       ),
+
+      // Earnings, only present once conversions have been synced from the
+      // network. Approved and pending are reported apart on purpose: a pending
+      // action is not money yet, and a reversed one is money taken back, so a
+      // single "revenue" figure would overstate what you have actually earned.
+      earnings: {
+        synced: scalar<number>('SELECT COUNT(*) FROM affiliate_actions', [], 0),
+        last_sync: scalar<string>('SELECT MAX(synced_at) FROM affiliate_actions', [], ''),
+        approved_cents: scalar<number>(
+          `SELECT COALESCE(SUM(payout_cents), 0) FROM affiliate_actions
+            WHERE state = 'APPROVED' AND event_date >= date('now', ?)`,
+          [since],
+          0
+        ),
+        pending_cents: scalar<number>(
+          `SELECT COALESCE(SUM(payout_cents), 0) FROM affiliate_actions
+            WHERE state = 'PENDING' AND event_date >= date('now', ?)`,
+          [since],
+          0
+        ),
+        reversed_cents: scalar<number>(
+          `SELECT COALESCE(SUM(payout_cents), 0) FROM affiliate_actions
+            WHERE state = 'REVERSED' AND event_date >= date('now', ?)`,
+          [since],
+          0
+        ),
+        unattributed: scalar<number>(
+          `SELECT COUNT(*) FROM affiliate_actions WHERE resource_id IS NULL`,
+          [],
+          0
+        ),
+        by_skill: all(
+          `SELECT s.id, s.name AS skill_name,
+                  COUNT(a.id) AS conversions,
+                  COALESCE(SUM(CASE WHEN a.state = 'APPROVED' THEN a.payout_cents ELSE 0 END), 0) AS approved_cents,
+                  COALESCE(SUM(CASE WHEN a.state = 'PENDING'  THEN a.payout_cents ELSE 0 END), 0) AS pending_cents
+             FROM affiliate_actions a
+             JOIN skills s ON s.id = a.skill_id
+            WHERE a.event_date >= date('now', ?)
+            GROUP BY s.id ORDER BY approved_cents DESC, conversions DESC LIMIT 25`,
+          [since]
+        ),
+      },
+    });
+  })
+);
+
+// ----------------------------------------------------------------- impact ---
+
+/** Catalogues the Impact account can see, so one can be picked to import from. */
+skillsRouter.get(
+  '/impact/catalogs',
+  wrap(async (_req, res) => {
+    const credentials = impactCredentials();
+    if (!credentials) {
+      return res.json({ items: [], error: 'No Impact credentials configured', configured: false });
+    }
+    const outcome = await listCatalogs(credentials);
+    res.json({ items: outcome.items, error: outcome.error ?? null, configured: true });
+  })
+);
+
+/**
+ * Import courses out of an Impact product catalogue.
+ *
+ * This is the path that needs no Udemy API at all: where the advertiser
+ * publishes a feed, it already carries the titles, prices and URLs the
+ * catalogue wants.
+ *
+ * Items are stored against the plain destination URL like every other course,
+ * so they pick up tracking at click time rather than arriving pre-wrapped.
+ */
+skillsRouter.post(
+  '/impact/catalog-import',
+  wrap(async (req, res) => {
+    const credentials = impactCredentials();
+    if (!credentials) throw badRequest('No Impact credentials configured');
+
+    const catalogId = String(req.body?.catalog_id ?? '').trim();
+    if (!catalogId) throw badRequest('catalog_id is required');
+
+    const skillId = toInt(req.body?.skill_id, 0) || null;
+    const skill = skillId
+      ? get<{ name: string; search_terms: string }>(
+          'SELECT name, search_terms FROM skills WHERE id = ?',
+          [skillId]
+        )
+      : null;
+    // Default the query to the skill being filled, so an import aimed at one
+    // skill does not drag in the advertiser's entire catalogue.
+    const query = String(
+      req.body?.query ?? [skill?.name, skill?.search_terms].filter(Boolean).join(' ')
+    ).trim();
+
+    const outcome = await listCatalogItems(credentials, catalogId, {
+      query: query || undefined,
+      maxPages: Math.min(Math.max(toInt(req.body?.max_pages, 2), 1), 10),
+    });
+
+    const limit = Math.min(Math.max(toInt(req.body?.limit, 25), 1), 200);
+    const imported: Array<{ title: string; url: string }> = [];
+    const skipped: Array<{ title: string; reason: string }> = [];
+
+    db.transaction(() => {
+      for (const item of outcome.items.slice(0, limit)) {
+        const url = normaliseUdemyUrl(item.url);
+        if (!url) {
+          skipped.push({ title: item.name, reason: 'not a Udemy course URL' });
+          continue;
+        }
+        const slug = udemyCourseSlug(url);
+        if (!slug) {
+          skipped.push({ title: item.name, reason: 'no course slug in the URL' });
+          continue;
+        }
+        saveCourse(skillId, {
+          external_id: slug,
+          title: item.name,
+          url,
+          instructor: '',
+          headline: item.description.slice(0, 300),
+          image_url: item.imageUrl,
+          price_cents: item.priceCents,
+          currency: item.currency,
+          rating: 0,
+          reviews: 0,
+          students: 0,
+          duration_minutes: 0,
+          level: '',
+        });
+        imported.push({ title: item.name, url });
+      }
+    })();
+
+    logActivity('learning_resources', null, 'create', `Impact catalog import: ${imported.length}`);
+    res.json({
+      query,
+      returned: outcome.items.length,
+      imported: imported.length,
+      skipped: skipped.length,
+      items: imported,
+      errors: skipped,
+      error: outcome.error ?? null,
+    });
+  })
+);
+
+/**
+ * Pull conversions back from Impact.
+ *
+ * Actions carry the SubId1 Helm stamped on the outbound link, which is what
+ * lets a payout land against the skill that earned it instead of in one
+ * undifferentiated total. An action whose sub id Helm does not recognise is
+ * still stored - it is real money, it just cannot be attributed, and dropping
+ * it would understate earnings.
+ */
+skillsRouter.post(
+  '/impact/sync-actions',
+  wrap(async (req, res) => {
+    const credentials = impactCredentials();
+    if (!credentials) throw badRequest('No Impact credentials configured');
+
+    const days = Math.min(Math.max(toInt(req.body?.days, 90), 1), 730);
+    const end = new Date();
+    const start = new Date(end.getTime() - days * 864e5);
+    const iso = (d: Date) => d.toISOString().slice(0, 10);
+
+    const outcome = await listActions(credentials, {
+      startDate: iso(start),
+      endDate: iso(end),
+    });
+
+    let stored = 0;
+    let attributed = 0;
+
+    db.transaction(() => {
+      for (const action of outcome.items) {
+        const resourceId = resourceIdFromSubId(action.subId);
+        // Only trust the tag if the row it names still exists.
+        const resource = resourceId
+          ? get<{ id: number; skill_id: number | null }>(
+              'SELECT id, skill_id FROM learning_resources WHERE id = ?',
+              [resourceId]
+            )
+          : null;
+        if (resource) attributed += 1;
+
+        run(
+          `INSERT INTO affiliate_actions
+             (external_id, network, resource_id, skill_id, campaign, state, event_date,
+              sale_cents, payout_cents, currency, sub_id, synced_at)
+           VALUES (?, 'impact', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+           ON CONFLICT(external_id) DO UPDATE SET
+             resource_id = excluded.resource_id, skill_id = excluded.skill_id,
+             state = excluded.state, event_date = excluded.event_date,
+             sale_cents = excluded.sale_cents, payout_cents = excluded.payout_cents,
+             currency = excluded.currency, synced_at = excluded.synced_at`,
+          [
+            action.externalId, resource?.id ?? null, resource?.skill_id ?? null,
+            action.campaign, action.state, action.eventDate, action.saleCents,
+            action.payoutCents, action.currency, action.subId,
+          ]
+        );
+        stored += 1;
+      }
+    })();
+
+    logActivity('affiliate_actions', null, 'update', `Impact sync: ${stored} action(s)`);
+    res.json({
+      days,
+      fetched: outcome.items.length,
+      stored,
+      attributed,
+      unattributed: stored - attributed,
+      error: outcome.error ?? null,
     });
   })
 );
