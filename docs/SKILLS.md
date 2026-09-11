@@ -187,6 +187,37 @@ got:
 | `udemy.com/course/slug/` | Helm wraps it with your network link and sub id |
 | A tracking link from your Impact dashboard | Sent on exactly as pasted |
 
+#### Saving warns, it never refuses
+
+A wrong affiliate link fails quietly: it saves, looks right, sits in the
+analyser for weeks and earns nothing. So a save is checked and anything odd is
+reported — but the link is always stored, because a book or a docs page is a
+perfectly good reference and Helm is in no position to adjudicate.
+
+Ordered by how much each actually tells you:
+
+| Check | Severity | Example |
+|---|---|---|
+| A disguised destination (`user@host`) | ⚠ warning | `https://www.udemy.com@evil.example/…` |
+| A host nobody else can reach | ⚠ warning | `localhost`, `192.168.1.50` |
+| A punycode / homograph host | ⚠ warning | `udеmy.com` with a Cyrillic *е* |
+| One or two characters off a known platform | ⚠ warning | `udmey.com` → "Did you mean Udemy?" |
+| A host *containing* a platform name but not it | ⚠ warning | `udemy.com.login-verify.example` |
+| A Udemy link that is not a `/course/` page | info | `udemy.com/user/someone/` |
+| An unrecognised host | info | `example.com/books/…` — fine for a book |
+
+The typo and lookalike checks are the ones worth having. "I don't recognise this
+host" is weak, since most of the web is not a course platform; "this is one
+character from a host I *do* recognise" almost always means a mistake. A
+homograph is only detectable because the URL parser normalises it to punycode
+first — to a reader it renders as the real domain.
+
+The first four end the check, so an unreachable host is not also told it is an
+unrecognised platform.
+
+Pasted lists are checked the same way, and warning-level findings are listed
+after the import.
+
 Override the detection by passing `pre_tracked` explicitly to
 `PUT /api/skills/:id/reference` if it ever guesses wrong.
 

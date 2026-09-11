@@ -981,7 +981,12 @@ function BulkImportModal({
   onSaved: () => void;
 }) {
   const [text, setText] = useState('');
-  const [result, setResult] = useState<{ imported: number; skipped: number; errors: Array<{ line: string; reason: string }> } | null>(null);
+  const [result, setResult] = useState<{
+    imported: number;
+    skipped: number;
+    items?: Array<{ title: string; warnings?: SaveWarning[] }>;
+    errors: Array<{ line: string; reason: string }>;
+  } | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -1051,6 +1056,13 @@ SEO | https://www.udemy.com/course/slug/ | The SEO Bootcamp`}
             <Banner tone={result.skipped ? 'error' : 'ok'}>
               Imported {result.imported} course(s){result.skipped ? `, skipped ${result.skipped}` : ''}. Courses already in the catalogue were updated in place.
             </Banner>
+            {(result.items ?? [])
+              .filter((i: any) => (i.warnings ?? []).length)
+              .map((i: any, n: number) => (
+                <div key={n} className="small neg">
+                  ⚠ {i.title}: {i.warnings.map((w: any) => w.message).join(' ')}
+                </div>
+              ))}
             {result.errors.length > 0 && (
               <div className="table-wrap">
                 <table className="data">
@@ -1193,24 +1205,31 @@ function ManageSkills() {
   );
 }
 
+type SaveWarning = { code: string; message: string; severity: 'warning' | 'info' };
+
 function SkillRow({ skill, onChanged }: { skill: ManagedSkill; onChanged: () => void }) {
   const [url, setUrl] = useState(skill.reference?.url ?? '');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
+  const [warnings, setWarnings] = useState<SaveWarning[]>([]);
+  const [platform, setPlatform] = useState<string | null>(null);
 
   const dirty = url.trim() !== (skill.reference?.url ?? '');
 
   const save = async () => {
     setBusy(true);
     setNote('');
+    setWarnings([]);
     try {
       const result = await api.put<any>(`/skills/${skill.id}/reference`, { url: url.trim() });
+      setWarnings(result.warnings ?? []);
+      setPlatform(result.platform ?? null);
       setNote(
         !result.reference
           ? 'Cleared.'
           : result.reference.pre_tracked
             ? 'Saved — already tracked, so it is passed through as is.'
-            : 'Saved — your affiliate link is added at click time.'
+            : `Saved${result.platform ? ` — ${result.platform}` : ''} — your affiliate link is added at click time.`
       );
       onChanged();
     } catch (err: any) {
@@ -1241,8 +1260,20 @@ function SkillRow({ skill, onChanged }: { skill: ManagedSkill; onChanged: () => 
           </button>
         </div>
         {note && <div className="small muted">{note}</div>}
+        {/* The link is already saved either way; this says what looks off about it. */}
+        {warnings.map((w) => (
+          <div
+            key={w.code}
+            className={`small ${w.severity === 'warning' ? 'neg' : 'muted'}`}
+            style={{ marginTop: 2 }}
+          >
+            {w.severity === 'warning' ? '⚠ ' : ''}
+            {w.message}
+          </div>
+        ))}
         {skill.reference && !note && (
           <div className="small muted">
+            {platform ? `${platform} · ` : ''}
             {skill.reference.pre_tracked ? 'pre-tracked link' : 'tracked at click time'}
             {' · '}
             <a

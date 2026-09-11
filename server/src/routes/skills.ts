@@ -12,6 +12,7 @@ import {
   summarise,
   type SkillRequirement,
 } from '../services/skills/gap.js';
+import { classifyReferenceUrl } from '../services/skills/links.js';
 import { buildPlan, planDuration, planProgress } from '../services/skills/plan.js';
 import { STARTER_ROLES, STARTER_SKILLS } from '../services/skills/taxonomy.js';
 import {
@@ -403,8 +404,17 @@ skillsRouter.put(
       run('UPDATE learning_resources SET pinned = 1 WHERE id = ?', [resourceId]);
     })();
 
+    // Warnings, not a refusal: any http(s) URL is a legitimate reference, but a
+    // link that is probably a typo should say so now rather than sit in the
+    // analyser earning nothing.
+    const check = classifyReferenceUrl(url);
     logActivity('skills', skillId, 'update', `reference link set for ${skill.name}`);
-    res.json({ skill_id: skillId, reference: referenceFor(skillId) });
+    res.json({
+      skill_id: skillId,
+      reference: referenceFor(skillId),
+      platform: check.platform,
+      warnings: check.warnings,
+    });
   })
 );
 
@@ -555,7 +565,12 @@ skillsRouter.post(
     const lines = parseBulkCourseLines(text);
     if (!lines.length) throw badRequest('No lines with a URL in them');
 
-    const imported: Array<{ url: string; skill: string | null; title: string }> = [];
+    const imported: Array<{
+      url: string;
+      skill: string | null;
+      title: string;
+      warnings: Array<{ code: string; message: string; severity: string }>;
+    }> = [];
     const skipped: Array<{ line: string; reason: string }> = [];
 
     db.transaction(() => {
@@ -609,6 +624,7 @@ skillsRouter.post(
           url,
           skill: skillId ? scalar<string>('SELECT name FROM skills WHERE id = ?', [skillId], '') : null,
           title,
+          warnings: classifyReferenceUrl(url).warnings.filter((w) => w.severity === 'warning'),
         });
       }
     })();
